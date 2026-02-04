@@ -258,7 +258,7 @@
       color: white;
     }
 
-    #sound-btn, #center-btn {
+    #sound-btn, #center-btn, #settings-btn {
       width: 56px;
       height: 56px;
       border-radius: 14px;
@@ -272,6 +272,10 @@
 
     #sound-btn.muted {
       color: #666;
+    }
+
+    #settings-btn {
+      font-size: 20px;
     }
 
     /* Corner visual overlay */
@@ -380,8 +384,18 @@
     <div class="setup-content">
       <h1>🏁 Pace Notes</h1>
       <p>Live road curvature guidance using GPS</p>
-      <input type="text" id="api-key-input" placeholder="Enter your Mapbox API key">
-      <button id="setup-btn" onclick="initializeApp()">Start App</button>
+      <div id="saved-key-notice" style="display: none; margin-bottom: 16px;">
+        <div style="background: rgba(34, 197, 94, 0.2); border: 1px solid #22c55e; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+          <div style="color: #22c55e; font-size: 13px;">✓ API key saved</div>
+          <div id="masked-key" style="font-family: monospace; font-size: 12px; color: #888; margin-top: 4px;"></div>
+        </div>
+        <button id="use-saved-btn" onclick="useSavedKey()" style="width: 100%; padding: 16px; border-radius: 12px; border: none; background: #22c55e; color: white; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 8px;">Continue with Saved Key</button>
+        <button id="change-key-btn" onclick="showKeyInput()" style="width: 100%; padding: 12px; border-radius: 12px; border: 1px solid #333; background: transparent; color: #888; font-size: 14px; cursor: pointer;">Change API Key</button>
+      </div>
+      <div id="key-input-section">
+        <input type="text" id="api-key-input" placeholder="Enter your Mapbox API key">
+        <button id="setup-btn" onclick="initializeApp()">Start App</button>
+      </div>
       <a href="https://account.mapbox.com/access-tokens/" target="_blank">Get a free Mapbox API key →</a>
     </div>
   </div>
@@ -446,6 +460,7 @@
       </button>
       <button id="sound-btn" onclick="toggleSound()">🔊</button>
       <button id="center-btn" onclick="centerOnUser()">◎</button>
+      <button id="settings-btn" onclick="openSettings()">⚙</button>
     </div>
   </div>
 
@@ -505,10 +520,55 @@
     function checkSavedKey() {
       const saved = localStorage.getItem('mapboxToken');
       if (saved) {
+        // Show saved key notice
+        document.getElementById('saved-key-notice').style.display = 'block';
+        document.getElementById('key-input-section').style.display = 'none';
+        document.getElementById('masked-key').textContent = maskApiKey(saved);
+      }
+    }
+
+    // Use the saved API key
+    function useSavedKey() {
+      const saved = localStorage.getItem('mapboxToken');
+      if (saved) {
         mapboxToken = saved;
         document.getElementById('setup-overlay').classList.add('hidden');
         initMap();
       }
+    }
+
+    // Show the key input form to change key
+    function showKeyInput() {
+      document.getElementById('saved-key-notice').style.display = 'none';
+      document.getElementById('key-input-section').style.display = 'block';
+      document.getElementById('api-key-input').value = '';
+      document.getElementById('api-key-input').focus();
+    }
+
+    // Open settings overlay
+    function openSettings() {
+      // Stop tracking if active
+      if (isTracking) {
+        stopTracking();
+      }
+
+      const saved = localStorage.getItem('mapboxToken');
+      if (saved) {
+        document.getElementById('saved-key-notice').style.display = 'block';
+        document.getElementById('key-input-section').style.display = 'none';
+        document.getElementById('masked-key').textContent = maskApiKey(saved);
+      } else {
+        document.getElementById('saved-key-notice').style.display = 'none';
+        document.getElementById('key-input-section').style.display = 'block';
+      }
+
+      document.getElementById('setup-overlay').classList.remove('hidden');
+    }
+
+    // Mask API key for display
+    function maskApiKey(key) {
+      if (key.length <= 8) return '••••••••';
+      return key.substring(0, 4) + '••••••••' + key.substring(key.length - 4);
     }
 
     // Initialize Mapbox
