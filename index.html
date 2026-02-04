@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Pace Notes - Live</title>
+  <script src="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.js"></script>
+  <link href="https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css" rel="stylesheet" />
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0a0a0f;
+      color: white;
+      overflow: hidden;
+      height: 100vh;
+      height: 100dvh;
+    }
+
+    #map {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+    }
+
+    /* Setup overlay */
+    #setup-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(10, 10, 15, 0.98);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    #setup-overlay.hidden {
+      display: none;
+    }
+
+    .setup-content {
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .setup-content h1 {
+      font-size: 28px;
+      margin-bottom: 8px;
+    }
+
+    .setup-content p {
+      color: #888;
+      margin-bottom: 24px;
+    }
+
+    .setup-content input {
+      width: 100%;
+      padding: 16px;
+      border-radius: 12px;
+      border: 1px solid #333;
+      background: #1a1a24;
+      color: white;
+      font-size: 14px;
+      margin-bottom: 12px;
+    }
+
+    .setup-content input::placeholder {
+      color: #666;
+    }
+
+    .setup-content button {
+      width: 100%;
+      padding: 16px;
+      border-radius: 12px;
+      border: none;
+      background: #22c55e;
+      color: white;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .setup-content button:disabled {
+      background: #333;
+      color: #666;
+    }
+
+    .setup-content a {
+      color: #60a5fa;
+      font-size: 13px;
+      display: block;
+      margin-top: 16px;
+    }
+
+    /* Main HUD */
+    #hud {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #pace-display {
+      background: linear-gradient(to bottom, rgba(10, 10, 15, 0.95), rgba(10, 10, 15, 0.8));
+      padding: 20px;
+      padding-top: max(20px, env(safe-area-inset-top));
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    #current-call {
+      text-align: center;
+      min-height: 140px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #distance-to-call {
+      font-size: 48px;
+      font-weight: 800;
+      font-family: 'SF Mono', 'Menlo', monospace;
+      line-height: 1;
+    }
+
+    #call-text {
+      font-size: 32px;
+      font-weight: 700;
+      margin-top: 8px;
+      text-shadow: 0 2px 20px rgba(0,0,0,0.5);
+    }
+
+    #call-description {
+      font-size: 14px;
+      color: #888;
+      margin-top: 4px;
+    }
+
+    .severity-1 { color: #ef4444; }
+    .severity-2 { color: #f97316; }
+    .severity-3 { color: #eab308; }
+    .severity-4 { color: #84cc16; }
+    .severity-5 { color: #22c55e; }
+    .severity-6 { color: #34d399; }
+
+    /* Upcoming notes */
+    #upcoming-strip {
+      display: flex;
+      gap: 8px;
+      padding: 12px 20px;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+
+    #upcoming-strip::-webkit-scrollbar {
+      display: none;
+    }
+
+    .upcoming-note {
+      flex-shrink: 0;
+      background: rgba(30, 30, 40, 0.9);
+      padding: 8px 14px;
+      border-radius: 10px;
+      font-size: 13px;
+      backdrop-filter: blur(10px);
+    }
+
+    .upcoming-note .dist {
+      color: #666;
+      font-size: 11px;
+    }
+
+    /* Bottom controls */
+    #controls {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      padding: 20px;
+      padding-bottom: max(20px, env(safe-area-inset-bottom));
+      background: linear-gradient(to top, rgba(10, 10, 15, 0.95), transparent);
+      z-index: 100;
+      pointer-events: none;
+    }
+
+    #controls > * {
+      pointer-events: auto;
+    }
+
+    #stats-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .stat-box {
+      background: rgba(30, 30, 40, 0.9);
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+      backdrop-filter: blur(10px);
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      font-family: 'SF Mono', monospace;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    #button-row {
+      display: flex;
+      gap: 12px;
+    }
+
+    #start-btn {
+      flex: 1;
+      padding: 18px;
+      border-radius: 14px;
+      border: none;
+      font-size: 17px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+
+    #start-btn.start {
+      background: #22c55e;
+      color: white;
+    }
+
+    #start-btn.stop {
+      background: #ef4444;
+      color: white;
+    }
+
+    #sound-btn, #center-btn {
+      width: 56px;
+      height: 56px;
+      border-radius: 14px;
+      border: none;
+      background: rgba(50, 50, 60, 0.9);
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+    }
+
+    #sound-btn.muted {
+      color: #666;
+    }
+
+    /* Corner visual overlay */
+    #corner-visual {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 200px;
+      height: 200px;
+      pointer-events: none;
+      z-index: 50;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    #corner-visual.visible {
+      opacity: 1;
+    }
+
+    /* Status messages */
+    #status {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(30, 30, 40, 0.95);
+      padding: 20px 30px;
+      border-radius: 16px;
+      text-align: center;
+      z-index: 200;
+      backdrop-filter: blur(20px);
+      display: none;
+    }
+
+    #status.visible {
+      display: block;
+    }
+
+    /* Legend */
+    #legend {
+      position: fixed;
+      bottom: 180px;
+      left: 20px;
+      background: rgba(20, 20, 30, 0.9);
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 11px;
+      z-index: 90;
+      backdrop-filter: blur(10px);
+      display: none;
+    }
+
+    #legend.visible {
+      display: block;
+    }
+
+    .legend-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 4px 0;
+    }
+
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    /* GPS accuracy indicator */
+    #gps-accuracy {
+      position: fixed;
+      top: max(20px, env(safe-area-inset-top));
+      right: 20px;
+      background: rgba(30, 30, 40, 0.9);
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      z-index: 110;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .gps-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .gps-dot.good { background: #22c55e; }
+    .gps-dot.medium { background: #eab308; }
+    .gps-dot.poor { background: #ef4444; }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Setup Overlay -->
+  <div id="setup-overlay">
+    <div class="setup-content">
+      <h1>🏁 Pace Notes</h1>
+      <p>Live road curvature guidance using GPS</p>
+      <input type="text" id="api-key-input" placeholder="Enter your Mapbox API key">
+      <button id="setup-btn" onclick="initializeApp()">Start App</button>
+      <a href="https://account.mapbox.com/access-tokens/" target="_blank">Get a free Mapbox API key →</a>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Corner Visual SVG -->
+  <svg id="corner-visual" viewBox="0 0 200 200">
+    <path id="corner-path" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"/>
+  </svg>
+
+  <!-- GPS Accuracy -->
+  <div id="gps-accuracy" style="display: none;">
+    <div class="gps-dot good"></div>
+    <span id="accuracy-text">GPS</span>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="pace-display">
+      <div id="current-call">
+        <div id="distance-to-call">—</div>
+        <div id="call-text">Waiting for GPS...</div>
+        <div id="call-description"></div>
+      </div>
+      <div id="upcoming-strip"></div>
+    </div>
+  </div>
+
+  <!-- Status -->
+  <div id="status">
+    <div id="status-text">Acquiring GPS...</div>
+  </div>
+
+  <!-- Legend -->
+  <div id="legend">
+    <div class="legend-row"><div class="legend-dot" style="background:#ef4444"></div> 1-2 Hairpin/Tight</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#eab308"></div> 3-4 Medium</div>
+    <div class="legend-row"><div class="legend-dot" style="background:#22c55e"></div> 5-6 Fast/Flat</div>
+  </div>
+
+  <!-- Controls -->
+  <div id="controls">
+    <div id="stats-row">
+      <div class="stat-box">
+        <div class="stat-value" id="speed-value">0</div>
+        <div class="stat-label">km/h</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="heading-value">—</div>
+        <div class="stat-label">heading</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-value" id="curves-value">0</div>
+        <div class="stat-label">curves ahead</div>
+      </div>
+    </div>
+    <div id="button-row">
+      <button id="start-btn" class="start" onclick="toggleTracking()">
+        <span>▶</span> Start
+      </button>
+      <button id="sound-btn" onclick="toggleSound()">🔊</button>
+      <button id="center-btn" onclick="centerOnUser()">◎</button>
+    </div>
+  </div>
+
+  <script>
+    // State
+    let map = null;
+    let mapboxToken = '';
+    let isTracking = false;
+    let soundEnabled = true;
+    let watchId = null;
+    let currentPosition = null;
+    let currentSpeed = 0;
+    let currentHeading = 0;
+    let lastFetchPosition = null;
+    let upcomingCurves = [];
+    let lastSpokenCurve = null;
+    let routeCoordinates = [];
+    let userMarker = null;
+    let curveMarkers = [];
+    let routeLine = null;
+
+    // DOM elements
+    const distanceEl = document.getElementById('distance-to-call');
+    const callTextEl = document.getElementById('call-text');
+    const callDescEl = document.getElementById('call-description');
+    const upcomingEl = document.getElementById('upcoming-strip');
+    const speedEl = document.getElementById('speed-value');
+    const headingEl = document.getElementById('heading-value');
+    const curvesEl = document.getElementById('curves-value');
+    const startBtn = document.getElementById('start-btn');
+    const soundBtn = document.getElementById('sound-btn');
+    const statusEl = document.getElementById('status');
+    const statusText = document.getElementById('status-text');
+    const cornerVisual = document.getElementById('corner-visual');
+    const cornerPath = document.getElementById('corner-path');
+    const gpsAccuracy = document.getElementById('gps-accuracy');
+    const accuracyText = document.getElementById('accuracy-text');
+    const gpsDot = document.querySelector('.gps-dot');
+    const legend = document.getElementById('legend');
+
+    // Initialize app with API key
+    function initializeApp() {
+      const keyInput = document.getElementById('api-key-input');
+      mapboxToken = keyInput.value.trim();
+
+      if (!mapboxToken) {
+        alert('Please enter your Mapbox API key');
+        return;
+      }
+
+      localStorage.setItem('mapboxToken', mapboxToken);
+      document.getElementById('setup-overlay').classList.add('hidden');
+      initMap();
+    }
+
+    // Check for saved API key
+    function checkSavedKey() {
+      const saved = localStorage.getItem('mapboxToken');
+      if (saved) {
+        mapboxToken = saved;
+        document.getElementById('setup-overlay').classList.add('hidden');
+        initMap();
+      }
+    }
+
+    // Initialize Mapbox
+    function initMap() {
+      mapboxgl.accessToken = mapboxToken;
+
+      map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/navigation-night-v1',
+        center: [0, 0],
+        zoom: 16,
+        pitch: 60,
+        bearing: 0
+      });
+
+      map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+
+      map.on('load', () => {
+        // Add route line source
+        map.addSource('route', {
+          type: 'geojson',
+          data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } }
+        });
+
+        map.addLayer({
+          id: 'route-line',
+          type: 'line',
+          source: 'route',
+          paint: {
+            'line-color': '#3b82f6',
+            'line-width': 6,
+            'line-opacity': 0.7
+          }
+        });
+
+        // Add curve markers source
+        map.addSource('curves', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+
+        map.addLayer({
+          id: 'curve-points',
+          type: 'circle',
+          source: 'curves',
+          paint: {
+            'circle-radius': 12,
+            'circle-color': ['get', 'color'],
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#fff'
+          }
+        });
+
+        map.addLayer({
+          id: 'curve-labels',
+          type: 'symbol',
+          source: 'curves',
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-size': 12,
+            'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold']
+          },
+          paint: {
+            'text-color': '#fff'
+          }
+        });
+
+        legend.classList.add('visible');
+        showStatus('Tap Start to begin tracking');
+      });
+    }
+
+    // Toggle tracking
+    function toggleTracking() {
+      if (isTracking) {
+        stopTracking();
+      } else {
+        startTracking();
+      }
+    }
+
+    // Start GPS tracking
+    function startTracking() {
+      if (!navigator.geolocation) {
+        showStatus('Geolocation not supported');
+        return;
+      }
+
+      showStatus('Acquiring GPS...');
+      gpsAccuracy.style.display = 'flex';
+
+      watchId = navigator.geolocation.watchPosition(
+        handlePosition,
+        handleError,
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000
+        }
+      );
+
+      isTracking = true;
+      startBtn.className = 'stop';
+      startBtn.innerHTML = '<span>⏹</span> Stop';
+    }
+
+    // Stop tracking
+    function stopTracking() {
+      if (watchId) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+
+      isTracking = false;
+      startBtn.className = 'start';
+      startBtn.innerHTML = '<span>▶</span> Start';
+      gpsAccuracy.style.display = 'none';
+      hideStatus();
+    }
+
+    // Handle GPS position update
+    async function handlePosition(position) {
+      hideStatus();
+
+      const { latitude, longitude, accuracy, heading, speed } = position.coords;
+      currentPosition = [longitude, latitude];
+      currentSpeed = speed ? Math.round(speed * 3.6) : 0; // m/s to km/h
+      currentHeading = heading || 0;
+
+      // Update accuracy indicator
+      updateAccuracyIndicator(accuracy);
+
+      // Update stats
+      speedEl.textContent = currentSpeed;
+      headingEl.textContent = getCompassDirection(currentHeading);
+
+      // Update user marker
+      updateUserMarker(currentPosition, currentHeading);
+
+      // Center map on user
+      map.easeTo({
+        center: currentPosition,
+        bearing: currentHeading || map.getBearing(),
+        duration: 500
+      });
+
+      // Fetch road data if moved enough (50m)
+      if (!lastFetchPosition || getDistance(lastFetchPosition, currentPosition) > 50) {
+        await fetchRoadAhead();
+        lastFetchPosition = currentPosition;
+      }
+
+      // Update curve distances and check for callouts
+      updateCurveDistances();
+      checkForCallouts();
+    }
+
+    // Update GPS accuracy indicator
+    function updateAccuracyIndicator(accuracy) {
+      accuracyText.textContent = `±${Math.round(accuracy)}m`;
+      gpsDot.className = 'gps-dot ' + (accuracy < 10 ? 'good' : accuracy < 30 ? 'medium' : 'poor');
+    }
+
+    // Update user marker on map
+    function updateUserMarker(coords, heading) {
+      if (!userMarker) {
+        const el = document.createElement('div');
+        el.innerHTML = `
+          <svg width="40" height="40" viewBox="0 0 40 40">
+            <circle cx="20" cy="20" r="18" fill="#3b82f6" stroke="white" stroke-width="3"/>
+            <path d="M20 8 L26 28 L20 24 L14 28 Z" fill="white"/>
+          </svg>
+        `;
+        el.style.width = '40px';
+        el.style.height = '40px';
+        userMarker = new mapboxgl.Marker({ element: el, rotationAlignment: 'map' })
+          .setLngLat(coords)
+          .addTo(map);
+      } else {
+        userMarker.setLngLat(coords);
+        userMarker.setRotation(heading || 0);
+      }
+    }
+
+    // Fetch road geometry ahead using Mapbox Directions
+    async function fetchRoadAhead() {
+      if (!currentPosition) return;
+
+      // Create a point ~1km ahead based on heading
+      const lookAheadDistance = 1; // km
+      const aheadPoint = getPointAhead(currentPosition, currentHeading || 0, lookAheadDistance);
+
+      try {
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${currentPosition[0]},${currentPosition[1]};${aheadPoint[0]},${aheadPoint[1]}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.routes && data.routes[0]) {
+          routeCoordinates = data.routes[0].geometry.coordinates;
+
+          // Update route on map
+          map.getSource('route').setData({
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: routeCoordinates }
+          });
+
+          // Analyze curves
+          analyzeCurves(routeCoordinates);
+        }
+      } catch (error) {
+        console.error('Error fetching road data:', error);
+      }
+    }
+
+    // Analyze road geometry for curves
+    function analyzeCurves(coordinates) {
+      upcomingCurves = [];
+
+      if (coordinates.length < 3) return;
+
+      const minAngleChange = 15; // degrees to count as a curve
+      let i = 0;
+
+      while (i < coordinates.length - 2) {
+        // Look at segments of ~50m
+        let segmentStart = i;
+        let segmentEnd = i;
+
+        // Find a segment of approximately 50-100m
+        let segmentDistance = 0;
+        while (segmentEnd < coordinates.length - 1 && segmentDistance < 100) {
+          segmentDistance += getDistance(coordinates[segmentEnd], coordinates[segmentEnd + 1]) * 1000;
+          segmentEnd++;
+        }
+
+        if (segmentEnd >= coordinates.length - 1) break;
+
+        // Calculate bearing change over this segment
+        const bearing1 = getBearing(coordinates[segmentStart], coordinates[Math.min(segmentStart + 2, coordinates.length - 1)]);
+        const bearing2 = getBearing(coordinates[Math.max(segmentEnd - 2, 0)], coordinates[segmentEnd]);
+        let angleChange = bearing2 - bearing1;
+
+        // Normalize to -180 to 180
+        while (angleChange > 180) angleChange -= 360;
+        while (angleChange < -180) angleChange += 360;
+
+        const absAngle = Math.abs(angleChange);
+
+        if (absAngle >= minAngleChange) {
+          // Calculate severity (1-6 scale based on angle)
+          // Sharper angles = lower severity number
+          let severity;
+          if (absAngle >= 120) severity = 1;      // Hairpin
+          else if (absAngle >= 90) severity = 2;  // Tight
+          else if (absAngle >= 60) severity = 3;  // Medium-tight
+          else if (absAngle >= 40) severity = 4;  // Medium
+          else if (absAngle >= 25) severity = 5;  // Fast
+          else severity = 6;                       // Very fast
+
+          const direction = angleChange > 0 ? 'R' : 'L';
+          const distanceFromStart = getRouteDistance(coordinates, 0, Math.floor((segmentStart + segmentEnd) / 2));
+
+          upcomingCurves.push({
+            position: coordinates[Math.floor((segmentStart + segmentEnd) / 2)],
+            severity,
+            direction,
+            angle: Math.round(absAngle),
+            distanceFromStart,
+            call: `${severity} ${direction === 'L' ? 'Left' : 'Right'}`,
+            description: getCurveDescription(severity, absAngle)
+          });
+        }
+
+        i = segmentEnd;
+      }
+
+      // Update map markers
+      updateCurveMarkers();
+      curvesEl.textContent = upcomingCurves.length;
+    }
+
+    // Get curve description
+    function getCurveDescription(severity, angle) {
+      if (severity <= 1) return `Hairpin (${angle}°)`;
+      if (severity <= 2) return `Tight turn (${angle}°)`;
+      if (severity <= 3) return `Medium curve (${angle}°)`;
+      if (severity <= 4) return `Open curve (${angle}°)`;
+      if (severity <= 5) return `Fast curve (${angle}°)`;
+      return `Gentle bend (${angle}°)`;
+    }
+
+    // Update curve markers on map
+    function updateCurveMarkers() {
+      const features = upcomingCurves.map(curve => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: curve.position },
+        properties: {
+          label: `${curve.severity}${curve.direction}`,
+          color: getSeverityColor(curve.severity)
+        }
+      }));
+
+      map.getSource('curves').setData({
+        type: 'FeatureCollection',
+        features
+      });
+    }
+
+    // Get color for severity
+    function getSeverityColor(severity) {
+      const colors = {
+        1: '#ef4444', 2: '#f97316', 3: '#eab308',
+        4: '#84cc16', 5: '#22c55e', 6: '#34d399'
+      };
+      return colors[severity] || '#888';
+    }
+
+    // Update distances to curves
+    function updateCurveDistances() {
+      if (!currentPosition || upcomingCurves.length === 0) return;
+
+      // Calculate distance to each curve
+      upcomingCurves.forEach(curve => {
+        curve.distance = Math.round(getDistance(currentPosition, curve.position) * 1000);
+      });
+
+      // Sort by distance
+      upcomingCurves.sort((a, b) => a.distance - b.distance);
+
+      // Filter out passed curves
+      upcomingCurves = upcomingCurves.filter(c => c.distance > -20);
+
+      // Update UI
+      updateUpcomingDisplay();
+    }
+
+    // Update upcoming curves display
+    function updateUpcomingDisplay() {
+      if (upcomingCurves.length === 0) {
+        distanceEl.textContent = '—';
+        callTextEl.textContent = 'Clear road ahead';
+        callTextEl.className = '';
+        callDescEl.textContent = '';
+        upcomingEl.innerHTML = '';
+        cornerVisual.classList.remove('visible');
+        return;
+      }
+
+      const next = upcomingCurves[0];
+
+      // Main display
+      distanceEl.textContent = `${next.distance}m`;
+      callTextEl.textContent = next.call;
+      callTextEl.className = `severity-${next.severity}`;
+      callDescEl.textContent = next.description;
+
+      // Show corner visual for close curves
+      if (next.distance < 150) {
+        showCornerVisual(next);
+      } else {
+        cornerVisual.classList.remove('visible');
+      }
+
+      // Upcoming strip
+      upcomingEl.innerHTML = upcomingCurves.slice(0, 5).map(curve => `
+        <div class="upcoming-note">
+          <div class="dist">${curve.distance}m</div>
+          <div class="severity-${curve.severity}">${curve.call}</div>
+        </div>
+      `).join('');
+    }
+
+    // Show corner visual
+    function showCornerVisual(curve) {
+      const severity = curve.severity;
+      const isLeft = curve.direction === 'L';
+      const radius = 30 + severity * 15;
+
+      // Draw curve path
+      const path = isLeft
+        ? `M 160 180 Q ${200 - radius} ${200 - radius} 160 20`
+        : `M 40 180 Q ${radius} ${200 - radius} 40 20`;
+
+      cornerPath.setAttribute('d', path);
+      cornerVisual.style.color = getSeverityColor(severity);
+      cornerVisual.classList.add('visible');
+    }
+
+    // Check if we should call out a curve
+    function checkForCallouts() {
+      if (!soundEnabled || upcomingCurves.length === 0) return;
+
+      const next = upcomingCurves[0];
+
+      // Calculate callout distance based on speed
+      // At higher speeds, call earlier
+      const calloutDistance = Math.max(50, Math.min(150, currentSpeed * 2));
+
+      if (next.distance <= calloutDistance && next.distance > 10) {
+        if (lastSpokenCurve !== next) {
+          speakCurve(next);
+          lastSpokenCurve = next;
+        }
+      }
+    }
+
+    // Speak curve callout
+    function speakCurve(curve) {
+      if (!('speechSynthesis' in window)) return;
+
+      window.speechSynthesis.cancel();
+
+      let text = curve.distance > 80 ? `${Math.round(curve.distance / 10) * 10}. ` : '';
+      text += `${curve.severity} ${curve.direction === 'L' ? 'Left' : 'Right'}`;
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.4;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // Toggle sound
+    function toggleSound() {
+      soundEnabled = !soundEnabled;
+      soundBtn.textContent = soundEnabled ? '🔊' : '🔇';
+      soundBtn.classList.toggle('muted', !soundEnabled);
+
+      if (!soundEnabled) {
+        window.speechSynthesis?.cancel();
+      }
+    }
+
+    // Center map on user
+    function centerOnUser() {
+      if (currentPosition) {
+        map.flyTo({
+          center: currentPosition,
+          zoom: 17,
+          pitch: 60,
+          bearing: currentHeading || 0
+        });
+      }
+    }
+
+    // Handle GPS error
+    function handleError(error) {
+      let message = 'GPS Error';
+      switch (error.code) {
+        case 1: message = 'Location access denied'; break;
+        case 2: message = 'Position unavailable'; break;
+        case 3: message = 'GPS timeout'; break;
+      }
+      showStatus(message);
+    }
+
+    // Show/hide status
+    function showStatus(text) {
+      statusText.textContent = text;
+      statusEl.classList.add('visible');
+    }
+
+    function hideStatus() {
+      statusEl.classList.remove('visible');
+    }
+
+    // Utility functions
+    function getDistance(coord1, coord2) {
+      // Haversine formula, returns km
+      const R = 6371;
+      const dLat = toRad(coord2[1] - coord1[1]);
+      const dLon = toRad(coord2[0] - coord1[0]);
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(toRad(coord1[1])) * Math.cos(toRad(coord2[1])) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return R * c;
+    }
+
+    function getRouteDistance(coords, startIdx, endIdx) {
+      let dist = 0;
+      for (let i = startIdx; i < endIdx && i < coords.length - 1; i++) {
+        dist += getDistance(coords[i], coords[i + 1]);
+      }
+      return dist * 1000; // return meters
+    }
+
+    function getBearing(coord1, coord2) {
+      const dLon = toRad(coord2[0] - coord1[0]);
+      const lat1 = toRad(coord1[1]);
+      const lat2 = toRad(coord2[1]);
+      const y = Math.sin(dLon) * Math.cos(lat2);
+      const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      return (toDeg(Math.atan2(y, x)) + 360) % 360;
+    }
+
+    function getPointAhead(coord, bearing, distanceKm) {
+      const R = 6371;
+      const d = distanceKm / R;
+      const brng = toRad(bearing);
+      const lat1 = toRad(coord[1]);
+      const lon1 = toRad(coord[0]);
+
+      const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) + Math.cos(lat1) * Math.sin(d) * Math.cos(brng));
+      const lon2 = lon1 + Math.atan2(Math.sin(brng) * Math.sin(d) * Math.cos(lat1), Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+
+      return [toDeg(lon2), toDeg(lat2)];
+    }
+
+    function getCompassDirection(heading) {
+      const directions = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+      return directions[Math.round(heading / 45) % 8];
+    }
+
+    function toRad(deg) { return deg * Math.PI / 180; }
+    function toDeg(rad) { return rad * 180 / Math.PI; }
+
+    // Initialize on load
+    window.addEventListener('DOMContentLoaded', checkSavedKey);
+  </script>
+</body>
+</html>
