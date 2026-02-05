@@ -601,38 +601,6 @@
           }
         });
 
-        // Add curve markers source
-        map.addSource('curves', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] }
-        });
-
-        map.addLayer({
-          id: 'curve-points',
-          type: 'circle',
-          source: 'curves',
-          paint: {
-            'circle-radius': 12,
-            'circle-color': ['get', 'color'],
-            'circle-stroke-width': 3,
-            'circle-stroke-color': '#fff'
-          }
-        });
-
-        map.addLayer({
-          id: 'curve-labels',
-          type: 'symbol',
-          source: 'curves',
-          layout: {
-            'text-field': ['get', 'label'],
-            'text-size': 12,
-            'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold']
-          },
-          paint: {
-            'text-color': '#fff'
-          }
-        });
-
         legend.classList.add('visible');
         showStatus('Tap Start to begin tracking');
       });
@@ -705,12 +673,12 @@
       // Update user marker
       updateUserMarker(currentPosition, currentHeading);
 
-      // Center map on user (padded so user is in lower portion, more road ahead visible)
+      // Center map ahead of user (so user appears in lower third, more road visible ahead)
+      const offsetCenter = getPointAhead(currentPosition, currentHeading || 0, 0.15); // 150m ahead
       map.easeTo({
-        center: currentPosition,
+        center: offsetCenter,
         bearing: currentHeading || map.getBearing(),
-        duration: 500,
-        padding: { top: 300, bottom: 50, left: 0, right: 0 }
+        duration: 500
       });
 
       // Fetch road data if moved enough (50m)
@@ -876,8 +844,6 @@
       // Detect "tightens" and "opens" for consecutive curves
       detectCompoundCurves();
 
-      // Update map markers
-      updateCurveMarkers();
       curvesEl.textContent = upcomingCurves.length;
     }
 
@@ -916,34 +882,6 @@
       if (severity === 4) return `${angle}° - 4th gear, open`;
       if (severity === 5) return `${angle}° - 5th gear, fast`;
       return `${angle}° - 6th gear, flat out`;
-    }
-
-    // Update curve markers on map
-    function updateCurveMarkers() {
-      const features = upcomingCurves.map(curve => {
-        let label;
-        if (curve.isHairpin) {
-          label = `H${curve.direction}`;  // H for Hairpin
-        } else if (curve.isSquare) {
-          label = `SQ${curve.direction}`; // SQ for Square
-        } else {
-          label = `${curve.severity}${curve.direction}`;
-        }
-
-        return {
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: curve.position },
-          properties: {
-            label,
-            color: curve.isHairpin ? '#dc2626' : getSeverityColor(curve.severity)
-          }
-        };
-      });
-
-      map.getSource('curves').setData({
-        type: 'FeatureCollection',
-        features
-      });
     }
 
     // Get color for severity
@@ -1020,7 +958,7 @@
       }
     }
 
-    // Speak curve callout - Rally style: "distance, severity direction [modifier]"
+    // Speak curve callout - Rally style: "direction severity [modifier]"
     function speakCurve(curve) {
       if (!('speechSynthesis' in window)) return;
 
@@ -1029,22 +967,17 @@
       const direction = curve.direction === 'L' ? 'left' : 'right';
       let text = '';
 
-      // Distance callout (rounded to 10m) - only for far curves
-      if (curve.distance > 80) {
-        text = `${Math.round(curve.distance / 10) * 10}. `;
-      }
-
       // Build the call: Direction first, then severity
       if (curve.isHairpin) {
-        text += `${direction} hairpin`;
+        text = `${direction} hairpin`;
       } else if (curve.isSquare) {
-        text += `${direction} square`;
+        text = `${direction} square`;
       } else if (curve.modifier === 'tightens') {
-        text += `${direction} ${curve.severity} tightens ${curve.tightensTo}`;
+        text = `${direction} ${curve.severity} tightens ${curve.tightensTo}`;
       } else if (curve.modifier === 'opens') {
-        text += `${direction} ${curve.severity} opens ${curve.opensTo}`;
+        text = `${direction} ${curve.severity} opens ${curve.opensTo}`;
       } else {
-        text += `${direction} ${curve.severity}`;
+        text = `${direction} ${curve.severity}`;
       }
 
       const utterance = new SpeechSynthesisUtterance(text);
@@ -1135,13 +1068,14 @@
       // Analyze curves in demo route
       analyzeCurves(demoRouteData);
 
-      // Center map on start (padded so user is lower, more road ahead)
+      // Center map ahead of start (so user appears in lower third)
+      const startBearing = getBearing(demoRouteData[0], demoRouteData[1]);
+      const offsetStart = getPointAhead(demoRouteData[0], startBearing, 0.15);
       map.flyTo({
-        center: demoRouteData[0],
+        center: offsetStart,
         zoom: 17,
         pitch: 70,
-        bearing: getBearing(demoRouteData[0], demoRouteData[1]),
-        padding: { top: 300, bottom: 50, left: 0, right: 0 }
+        bearing: startBearing
       });
 
       // Start simulation loop (update every 200ms for smooth animation)
@@ -1212,12 +1146,12 @@
       // Update user marker
       updateUserMarker(currentPosition, currentHeading);
 
-      // Center map on user (padded so user is lower, more road ahead)
+      // Center map ahead of user (so user appears in lower third)
+      const offsetCenter = getPointAhead(currentPosition, currentHeading, 0.15);
       map.easeTo({
-        center: currentPosition,
+        center: offsetCenter,
         bearing: currentHeading,
-        duration: 200,
-        padding: { top: 300, bottom: 50, left: 0, right: 0 }
+        duration: 200
       });
 
       // Update curve distances and check for callouts
@@ -1228,12 +1162,12 @@
     // Center map on user
     function centerOnUser() {
       if (currentPosition) {
+        const offsetCenter = getPointAhead(currentPosition, currentHeading || 0, 0.15);
         map.flyTo({
-          center: currentPosition,
+          center: offsetCenter,
           zoom: 17,
           pitch: 70,
-          bearing: currentHeading || 0,
-          padding: { top: 300, bottom: 50, left: 0, right: 0 }
+          bearing: currentHeading || 0
         });
       }
     }
