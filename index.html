@@ -286,24 +286,6 @@
       font-size: 20px;
     }
 
-    /* Corner visual overlay */
-    #corner-visual {
-      position: fixed;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: 200px;
-      height: 200px;
-      pointer-events: none;
-      z-index: 50;
-      opacity: 0;
-      transition: opacity 0.3s;
-    }
-
-    #corner-visual.visible {
-      opacity: 1;
-    }
-
     /* Status messages */
     #status {
       position: fixed;
@@ -411,11 +393,6 @@
   <!-- Map -->
   <div id="map"></div>
 
-  <!-- Corner Visual SVG -->
-  <svg id="corner-visual" viewBox="0 0 200 200">
-    <path id="corner-path" fill="none" stroke="currentColor" stroke-width="12" stroke-linecap="round"/>
-  </svg>
-
   <!-- GPS Accuracy -->
   <div id="gps-accuracy" style="display: none;">
     <div class="gps-dot good"></div>
@@ -516,8 +493,6 @@
     const soundBtn = document.getElementById('sound-btn');
     const statusEl = document.getElementById('status');
     const statusText = document.getElementById('status-text');
-    const cornerVisual = document.getElementById('corner-visual');
-    const cornerPath = document.getElementById('corner-path');
     const gpsAccuracy = document.getElementById('gps-accuracy');
     const accuracyText = document.getElementById('accuracy-text');
     const gpsDot = document.querySelector('.gps-dot');
@@ -601,8 +576,8 @@
         container: 'map',
         style: 'mapbox://styles/mapbox/navigation-night-v1',
         center: [0, 0],
-        zoom: 16,
-        pitch: 60,
+        zoom: 17,
+        pitch: 70,
         bearing: 0
       });
 
@@ -730,11 +705,12 @@
       // Update user marker
       updateUserMarker(currentPosition, currentHeading);
 
-      // Center map on user
+      // Center map on user (padded so user is in lower portion, more road ahead visible)
       map.easeTo({
         center: currentPosition,
         bearing: currentHeading || map.getBearing(),
-        duration: 500
+        duration: 500,
+        padding: { top: 300, bottom: 50, left: 0, right: 0 }
       });
 
       // Fetch road data if moved enough (50m)
@@ -1006,7 +982,6 @@
         callTextEl.className = '';
         callDescEl.textContent = '';
         upcomingEl.innerHTML = '';
-        cornerVisual.classList.remove('visible');
         return;
       }
 
@@ -1018,13 +993,6 @@
       callTextEl.className = `severity-${next.severity}`;
       callDescEl.textContent = next.description;
 
-      // Show corner visual for close curves
-      if (next.distance < 150) {
-        showCornerVisual(next);
-      } else {
-        cornerVisual.classList.remove('visible');
-      }
-
       // Upcoming strip
       upcomingEl.innerHTML = upcomingCurves.slice(0, 5).map(curve => `
         <div class="upcoming-note">
@@ -1032,22 +1000,6 @@
           <div class="severity-${curve.severity}">${curve.call}</div>
         </div>
       `).join('');
-    }
-
-    // Show corner visual
-    function showCornerVisual(curve) {
-      const severity = curve.severity;
-      const isLeft = curve.direction === 'L';
-      const radius = 30 + severity * 15;
-
-      // Draw curve path
-      const path = isLeft
-        ? `M 160 180 Q ${200 - radius} ${200 - radius} 160 20`
-        : `M 40 180 Q ${radius} ${200 - radius} 40 20`;
-
-      cornerPath.setAttribute('d', path);
-      cornerVisual.style.color = getSeverityColor(severity);
-      cornerVisual.classList.add('visible');
     }
 
     // Check if we should call out a curve
@@ -1183,12 +1135,13 @@
       // Analyze curves in demo route
       analyzeCurves(demoRouteData);
 
-      // Center map on start
+      // Center map on start (padded so user is lower, more road ahead)
       map.flyTo({
         center: demoRouteData[0],
-        zoom: 16,
-        pitch: 60,
-        bearing: getBearing(demoRouteData[0], demoRouteData[1])
+        zoom: 17,
+        pitch: 70,
+        bearing: getBearing(demoRouteData[0], demoRouteData[1]),
+        padding: { top: 300, bottom: 50, left: 0, right: 0 }
       });
 
       // Start simulation loop (update every 200ms for smooth animation)
@@ -1259,11 +1212,12 @@
       // Update user marker
       updateUserMarker(currentPosition, currentHeading);
 
-      // Center map on user
+      // Center map on user (padded so user is lower, more road ahead)
       map.easeTo({
         center: currentPosition,
         bearing: currentHeading,
-        duration: 200
+        duration: 200,
+        padding: { top: 300, bottom: 50, left: 0, right: 0 }
       });
 
       // Update curve distances and check for callouts
@@ -1277,8 +1231,9 @@
         map.flyTo({
           center: currentPosition,
           zoom: 17,
-          pitch: 60,
-          bearing: currentHeading || 0
+          pitch: 70,
+          bearing: currentHeading || 0,
+          padding: { top: 300, bottom: 50, left: 0, right: 0 }
         });
       }
     }
