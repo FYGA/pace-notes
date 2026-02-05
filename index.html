@@ -233,7 +233,7 @@
       gap: 12px;
     }
 
-    #start-btn {
+    #start-btn, #demo-btn {
       flex: 1;
       padding: 18px;
       border-radius: 14px;
@@ -248,9 +248,17 @@
       transition: all 0.2s;
     }
 
-    #start-btn.start {
+    #start-btn.start, #demo-btn {
       background: #22c55e;
       color: white;
+    }
+
+    #demo-btn {
+      background: #8b5cf6;
+    }
+
+    #demo-btn.active {
+      background: #ef4444;
     }
 
     #start-btn.stop {
@@ -458,6 +466,9 @@
       <button id="start-btn" class="start" onclick="toggleTracking()">
         <span>▶</span> Start
       </button>
+      <button id="demo-btn" onclick="toggleDemo()">
+        <span>🎬</span> Demo
+      </button>
       <button id="sound-btn" onclick="toggleSound()">🔊</button>
       <button id="center-btn" onclick="centerOnUser()">◎</button>
       <button id="settings-btn" onclick="openSettings()">⚙</button>
@@ -481,6 +492,44 @@
     let userMarker = null;
     let curveMarkers = [];
     let routeLine = null;
+
+    // Demo mode state
+    let isDemoMode = false;
+    let demoInterval = null;
+    let demoIndex = 0;
+    let demoSpeed = 60; // km/h
+
+    // Demo route: Mountain switchback road with distinct hairpins
+    const DEMO_ROUTE = [
+      // Straight north
+      [10.4500, 46.5100], [10.4500, 46.5105], [10.4500, 46.5110], [10.4500, 46.5115],
+      [10.4500, 46.5120], [10.4500, 46.5125], [10.4500, 46.5130], [10.4500, 46.5135],
+      // HAIRPIN RIGHT - switchback
+      [10.4505, 46.5140], [10.4515, 46.5142], [10.4525, 46.5140], [10.4530, 46.5135],
+      // Straight south
+      [10.4530, 46.5130], [10.4530, 46.5125], [10.4530, 46.5120], [10.4530, 46.5115],
+      [10.4530, 46.5110], [10.4530, 46.5105],
+      // HAIRPIN LEFT - switchback
+      [10.4535, 46.5100], [10.4545, 46.5098], [10.4555, 46.5100], [10.4560, 46.5105],
+      // Straight north
+      [10.4560, 46.5110], [10.4560, 46.5115], [10.4560, 46.5120], [10.4560, 46.5125],
+      // MEDIUM RIGHT curve
+      [10.4565, 46.5130], [10.4575, 46.5133], [10.4585, 46.5130],
+      // Straight east-south
+      [10.4590, 46.5125], [10.4590, 46.5120], [10.4590, 46.5115],
+      // TIGHT LEFT turn
+      [10.4585, 46.5110], [10.4575, 46.5108], [10.4565, 46.5110],
+      // Straight west
+      [10.4560, 46.5110], [10.4555, 46.5110], [10.4550, 46.5110],
+      // HAIRPIN RIGHT - another switchback
+      [10.4545, 46.5105], [10.4545, 46.5095], [10.4550, 46.5090], [10.4560, 46.5088],
+      // Straight east
+      [10.4570, 46.5088], [10.4580, 46.5088], [10.4590, 46.5088],
+      // FAST LEFT curve
+      [10.4598, 46.5092], [10.4602, 46.5100],
+      // Straight north to finish
+      [10.4602, 46.5108], [10.4602, 46.5116], [10.4602, 46.5124], [10.4602, 46.5132]
+    ];
 
     // DOM elements
     const distanceEl = document.getElementById('distance-to-call');
@@ -1002,6 +1051,132 @@
       if (!soundEnabled) {
         window.speechSynthesis?.cancel();
       }
+    }
+
+    // Toggle demo mode
+    function toggleDemo() {
+      if (isDemoMode) {
+        stopDemo();
+      } else {
+        startDemo();
+      }
+    }
+
+    // Start demo mode
+    function startDemo() {
+      // Stop real tracking if active
+      if (isTracking) {
+        stopTracking();
+      }
+
+      isDemoMode = true;
+      demoIndex = 0;
+      const demoBtn = document.getElementById('demo-btn');
+      demoBtn.classList.add('active');
+      demoBtn.innerHTML = '<span>⏹</span> Stop Demo';
+
+      // Show GPS indicator for demo
+      gpsAccuracy.style.display = 'flex';
+      accuracyText.textContent = 'DEMO';
+      gpsDot.className = 'gps-dot good';
+
+      // Set initial position and center map
+      currentPosition = DEMO_ROUTE[0];
+      routeCoordinates = DEMO_ROUTE;
+
+      // Update route on map
+      map.getSource('route').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: DEMO_ROUTE }
+      });
+
+      // Analyze curves in demo route
+      analyzeCurves(DEMO_ROUTE);
+
+      // Center map on start
+      map.flyTo({
+        center: DEMO_ROUTE[0],
+        zoom: 16,
+        pitch: 60,
+        bearing: getBearing(DEMO_ROUTE[0], DEMO_ROUTE[1])
+      });
+
+      // Start simulation loop (update every 200ms for smooth animation)
+      demoInterval = setInterval(simulateDemoMovement, 200);
+      showStatus('Demo: Mountain Road');
+      setTimeout(hideStatus, 2000);
+    }
+
+    // Stop demo mode
+    function stopDemo() {
+      isDemoMode = false;
+      if (demoInterval) {
+        clearInterval(demoInterval);
+        demoInterval = null;
+      }
+
+      const demoBtn = document.getElementById('demo-btn');
+      demoBtn.classList.remove('active');
+      demoBtn.innerHTML = '<span>🎬</span> Demo';
+      gpsAccuracy.style.display = 'none';
+
+      // Reset display
+      distanceEl.textContent = '—';
+      callTextEl.textContent = 'Demo stopped';
+      callTextEl.className = '';
+      callDescEl.textContent = '';
+      upcomingEl.innerHTML = '';
+      speedEl.textContent = '0';
+      curvesEl.textContent = '0';
+    }
+
+    // Simulate movement along demo route
+    function simulateDemoMovement() {
+      if (!isDemoMode || demoIndex >= DEMO_ROUTE.length - 1) {
+        if (demoIndex >= DEMO_ROUTE.length - 1) {
+          // Loop back to start
+          demoIndex = 0;
+          lastSpokenCurve = null;
+        }
+        return;
+      }
+
+      // Move to next point
+      demoIndex++;
+      currentPosition = DEMO_ROUTE[demoIndex];
+
+      // Calculate heading to next point
+      if (demoIndex < DEMO_ROUTE.length - 1) {
+        currentHeading = getBearing(DEMO_ROUTE[demoIndex], DEMO_ROUTE[demoIndex + 1]);
+      }
+
+      // Simulate speed (vary based on curve severity)
+      const nearestCurve = upcomingCurves[0];
+      if (nearestCurve && nearestCurve.distance < 100) {
+        // Slow down for curves
+        demoSpeed = Math.max(30, 70 - (6 - nearestCurve.severity) * 10);
+      } else {
+        demoSpeed = 70;
+      }
+      currentSpeed = demoSpeed;
+
+      // Update UI
+      speedEl.textContent = currentSpeed;
+      headingEl.textContent = getCompassDirection(currentHeading);
+
+      // Update user marker
+      updateUserMarker(currentPosition, currentHeading);
+
+      // Center map on user
+      map.easeTo({
+        center: currentPosition,
+        bearing: currentHeading,
+        duration: 200
+      });
+
+      // Update curve distances and check for callouts
+      updateCurveDistances();
+      checkForCallouts();
     }
 
     // Center map on user
