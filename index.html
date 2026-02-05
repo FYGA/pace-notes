@@ -841,58 +841,127 @@
         const absAngle = Math.abs(angleChange);
 
         if (absAngle >= minAngleChange) {
-          // Calculate severity (1-6 scale based on angle)
-          // Sharper angles = lower severity number
+          // Rally pace notes: 1-6 scale (1=tightest, 6=fastest)
+          // Hairpin is called separately for >150°
           let severity;
-          if (absAngle >= 120) severity = 1;      // Hairpin
-          else if (absAngle >= 90) severity = 2;  // Tight
-          else if (absAngle >= 60) severity = 3;  // Medium-tight
-          else if (absAngle >= 40) severity = 4;  // Medium
-          else if (absAngle >= 25) severity = 5;  // Fast
-          else severity = 6;                       // Very fast
+          let isHairpin = false;
+          let isSquare = false;
 
-          const direction = angleChange > 0 ? 'R' : 'L';
+          if (absAngle >= 150) {
+            severity = 1;
+            isHairpin = true;  // Hairpin - tighter than 1
+          } else if (absAngle >= 110) {
+            severity = 1;      // Very tight, first gear
+          } else if (absAngle >= 85 && absAngle <= 95) {
+            severity = 2;
+            isSquare = true;   // Square corner (~90°)
+          } else if (absAngle >= 80) {
+            severity = 2;      // Tight
+          } else if (absAngle >= 60) {
+            severity = 3;      // Medium-tight
+          } else if (absAngle >= 40) {
+            severity = 4;      // Medium-open
+          } else if (absAngle >= 25) {
+            severity = 5;      // Fast
+          } else {
+            severity = 6;      // Very fast, nearly flat
+          }
+
+          const direction = angleChange > 0 ? 'right' : 'left';
+          const dirShort = angleChange > 0 ? 'R' : 'L';
           const distanceFromStart = getRouteDistance(coordinates, 0, Math.floor((segmentStart + segmentEnd) / 2));
+
+          // Build the call in rally format
+          let call;
+          if (isHairpin) {
+            call = `Hairpin ${direction}`;
+          } else if (isSquare) {
+            call = `Square ${direction}`;
+          } else {
+            call = `${severity} ${direction}`;
+          }
 
           upcomingCurves.push({
             position: coordinates[Math.floor((segmentStart + segmentEnd) / 2)],
             severity,
-            direction,
+            direction: dirShort,
             angle: Math.round(absAngle),
             distanceFromStart,
-            call: `${severity} ${direction === 'L' ? 'Left' : 'Right'}`,
-            description: getCurveDescription(severity, absAngle)
+            isHairpin,
+            isSquare,
+            call,
+            description: getCurveDescription(severity, absAngle, isHairpin, isSquare)
           });
         }
 
         i = segmentEnd;
       }
 
+      // Detect "tightens" and "opens" for consecutive curves
+      detectCompoundCurves();
+
       // Update map markers
       updateCurveMarkers();
       curvesEl.textContent = upcomingCurves.length;
     }
 
+    // Detect compound curves (tightens/opens)
+    function detectCompoundCurves() {
+      for (let i = 0; i < upcomingCurves.length - 1; i++) {
+        const current = upcomingCurves[i];
+        const next = upcomingCurves[i + 1];
+
+        // If curves are close together and same direction
+        const distBetween = Math.abs(current.distanceFromStart - next.distanceFromStart);
+        if (distBetween < 150 && current.direction === next.direction) {
+          if (next.severity < current.severity) {
+            // Tightens: starts fast, gets tighter
+            current.modifier = 'tightens';
+            current.tightensTo = next.severity;
+            current.call = `${current.severity} ${current.direction === 'R' ? 'right' : 'left'} tightens ${next.severity}`;
+          } else if (next.severity > current.severity) {
+            // Opens: starts tight, gets faster
+            current.modifier = 'opens';
+            current.opensTo = next.severity;
+            current.call = `${current.severity} ${current.direction === 'R' ? 'right' : 'left'} opens ${next.severity}`;
+          }
+        }
+      }
+    }
+
     // Get curve description
-    function getCurveDescription(severity, angle) {
-      if (severity <= 1) return `Hairpin (${angle}°)`;
-      if (severity <= 2) return `Tight turn (${angle}°)`;
-      if (severity <= 3) return `Medium curve (${angle}°)`;
-      if (severity <= 4) return `Open curve (${angle}°)`;
-      if (severity <= 5) return `Fast curve (${angle}°)`;
-      return `Gentle bend (${angle}°)`;
+    function getCurveDescription(severity, angle, isHairpin, isSquare) {
+      if (isHairpin) return `Hairpin ${angle}° - very slow, may need handbrake`;
+      if (isSquare) return `Square ${angle}° - 90° corner`;
+      if (severity === 1) return `${angle}° - 1st gear, very tight`;
+      if (severity === 2) return `${angle}° - 2nd gear, tight`;
+      if (severity === 3) return `${angle}° - 3rd gear, medium`;
+      if (severity === 4) return `${angle}° - 4th gear, open`;
+      if (severity === 5) return `${angle}° - 5th gear, fast`;
+      return `${angle}° - 6th gear, flat out`;
     }
 
     // Update curve markers on map
     function updateCurveMarkers() {
-      const features = upcomingCurves.map(curve => ({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: curve.position },
-        properties: {
-          label: `${curve.severity}${curve.direction}`,
-          color: getSeverityColor(curve.severity)
+      const features = upcomingCurves.map(curve => {
+        let label;
+        if (curve.isHairpin) {
+          label = `H${curve.direction}`;  // H for Hairpin
+        } else if (curve.isSquare) {
+          label = `SQ${curve.direction}`; // SQ for Square
+        } else {
+          label = `${curve.severity}${curve.direction}`;
         }
-      }));
+
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: curve.position },
+          properties: {
+            label,
+            color: curve.isHairpin ? '#dc2626' : getSeverityColor(curve.severity)
+          }
+        };
+      });
 
       map.getSource('curves').setData({
         type: 'FeatureCollection',
@@ -998,17 +1067,35 @@
       }
     }
 
-    // Speak curve callout
+    // Speak curve callout - Rally style: "distance, severity direction [modifier]"
     function speakCurve(curve) {
       if (!('speechSynthesis' in window)) return;
 
       window.speechSynthesis.cancel();
 
-      let text = curve.distance > 80 ? `${Math.round(curve.distance / 10) * 10}. ` : '';
-      text += `${curve.severity} ${curve.direction === 'L' ? 'Left' : 'Right'}`;
+      const direction = curve.direction === 'L' ? 'left' : 'right';
+      let text = '';
+
+      // Distance callout (rounded to 10m) - only for far curves
+      if (curve.distance > 80) {
+        text = `${Math.round(curve.distance / 10) * 10}. `;
+      }
+
+      // Build the call
+      if (curve.isHairpin) {
+        text += `Hairpin ${direction}`;
+      } else if (curve.isSquare) {
+        text += `Square ${direction}`;
+      } else if (curve.modifier === 'tightens') {
+        text += `${curve.severity} ${direction} tightens ${curve.tightensTo}`;
+      } else if (curve.modifier === 'opens') {
+        text += `${curve.severity} ${direction} opens ${curve.opensTo}`;
+      } else {
+        text += `${curve.severity} ${direction}`;
+      }
 
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.4;
+      utterance.rate = 1.3;  // Slightly slower for clarity
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
 
