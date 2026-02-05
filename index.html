@@ -233,7 +233,7 @@
       gap: 12px;
     }
 
-    #start-btn {
+    #start-btn, #demo-btn {
       flex: 1;
       padding: 18px;
       border-radius: 14px;
@@ -248,9 +248,17 @@
       transition: all 0.2s;
     }
 
-    #start-btn.start {
+    #start-btn.start, #demo-btn {
       background: #22c55e;
       color: white;
+    }
+
+    #demo-btn {
+      background: #8b5cf6;
+    }
+
+    #demo-btn.active {
+      background: #ef4444;
     }
 
     #start-btn.stop {
@@ -458,6 +466,9 @@
       <button id="start-btn" class="start" onclick="toggleTracking()">
         <span>▶</span> Start
       </button>
+      <button id="demo-btn" onclick="toggleDemo()">
+        <span>🎬</span> Demo
+      </button>
       <button id="sound-btn" onclick="toggleSound()">🔊</button>
       <button id="center-btn" onclick="centerOnUser()">◎</button>
       <button id="settings-btn" onclick="openSettings()">⚙</button>
@@ -481,6 +492,29 @@
     let userMarker = null;
     let curveMarkers = [];
     let routeLine = null;
+
+    // Demo mode state
+    let isDemoMode = false;
+    let demoInterval = null;
+    let demoIndex = 0;
+    let demoSpeed = 60; // km/h
+
+    // Demo route: Stelvio Pass hairpins (Italy) - famous curvy mountain road
+    const DEMO_ROUTE = [
+      [10.4528, 46.5285], [10.4532, 46.5282], [10.4538, 46.5278], [10.4545, 46.5273],
+      [10.4551, 46.5267], [10.4555, 46.5260], [10.4557, 46.5252], [10.4556, 46.5244],
+      [10.4552, 46.5237], [10.4545, 46.5232], [10.4536, 46.5229], [10.4526, 46.5228],
+      [10.4516, 46.5230], [10.4508, 46.5235], [10.4503, 46.5242], [10.4501, 46.5250],
+      [10.4502, 46.5258], [10.4507, 46.5265], [10.4515, 46.5270], [10.4525, 46.5273],
+      [10.4535, 46.5274], [10.4545, 46.5272], [10.4554, 46.5267], [10.4560, 46.5260],
+      [10.4563, 46.5252], [10.4562, 46.5243], [10.4558, 46.5235], [10.4550, 46.5229],
+      [10.4540, 46.5225], [10.4529, 46.5224], [10.4518, 46.5226], [10.4509, 46.5231],
+      [10.4503, 46.5239], [10.4500, 46.5248], [10.4501, 46.5257], [10.4506, 46.5265],
+      [10.4514, 46.5271], [10.4524, 46.5275], [10.4535, 46.5276], [10.4546, 46.5274],
+      [10.4556, 46.5269], [10.4563, 46.5262], [10.4567, 46.5253], [10.4567, 46.5244],
+      [10.4564, 46.5235], [10.4557, 46.5228], [10.4548, 46.5223], [10.4537, 46.5221],
+      [10.4526, 46.5222], [10.4516, 46.5226], [10.4508, 46.5233], [10.4504, 46.5242]
+    ];
 
     // DOM elements
     const distanceEl = document.getElementById('distance-to-call');
@@ -1002,6 +1036,132 @@
       if (!soundEnabled) {
         window.speechSynthesis?.cancel();
       }
+    }
+
+    // Toggle demo mode
+    function toggleDemo() {
+      if (isDemoMode) {
+        stopDemo();
+      } else {
+        startDemo();
+      }
+    }
+
+    // Start demo mode
+    function startDemo() {
+      // Stop real tracking if active
+      if (isTracking) {
+        stopTracking();
+      }
+
+      isDemoMode = true;
+      demoIndex = 0;
+      const demoBtn = document.getElementById('demo-btn');
+      demoBtn.classList.add('active');
+      demoBtn.innerHTML = '<span>⏹</span> Stop Demo';
+
+      // Show GPS indicator for demo
+      gpsAccuracy.style.display = 'flex';
+      accuracyText.textContent = 'DEMO';
+      gpsDot.className = 'gps-dot good';
+
+      // Set initial position and center map
+      currentPosition = DEMO_ROUTE[0];
+      routeCoordinates = DEMO_ROUTE;
+
+      // Update route on map
+      map.getSource('route').setData({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: DEMO_ROUTE }
+      });
+
+      // Analyze curves in demo route
+      analyzeCurves(DEMO_ROUTE);
+
+      // Center map on start
+      map.flyTo({
+        center: DEMO_ROUTE[0],
+        zoom: 16,
+        pitch: 60,
+        bearing: getBearing(DEMO_ROUTE[0], DEMO_ROUTE[1])
+      });
+
+      // Start simulation loop (update every 200ms for smooth animation)
+      demoInterval = setInterval(simulateDemoMovement, 200);
+      showStatus('Demo: Stelvio Pass, Italy');
+      setTimeout(hideStatus, 2000);
+    }
+
+    // Stop demo mode
+    function stopDemo() {
+      isDemoMode = false;
+      if (demoInterval) {
+        clearInterval(demoInterval);
+        demoInterval = null;
+      }
+
+      const demoBtn = document.getElementById('demo-btn');
+      demoBtn.classList.remove('active');
+      demoBtn.innerHTML = '<span>🎬</span> Demo';
+      gpsAccuracy.style.display = 'none';
+
+      // Reset display
+      distanceEl.textContent = '—';
+      callTextEl.textContent = 'Demo stopped';
+      callTextEl.className = '';
+      callDescEl.textContent = '';
+      upcomingEl.innerHTML = '';
+      speedEl.textContent = '0';
+      curvesEl.textContent = '0';
+    }
+
+    // Simulate movement along demo route
+    function simulateDemoMovement() {
+      if (!isDemoMode || demoIndex >= DEMO_ROUTE.length - 1) {
+        if (demoIndex >= DEMO_ROUTE.length - 1) {
+          // Loop back to start
+          demoIndex = 0;
+          lastSpokenCurve = null;
+        }
+        return;
+      }
+
+      // Move to next point
+      demoIndex++;
+      currentPosition = DEMO_ROUTE[demoIndex];
+
+      // Calculate heading to next point
+      if (demoIndex < DEMO_ROUTE.length - 1) {
+        currentHeading = getBearing(DEMO_ROUTE[demoIndex], DEMO_ROUTE[demoIndex + 1]);
+      }
+
+      // Simulate speed (vary based on curve severity)
+      const nearestCurve = upcomingCurves[0];
+      if (nearestCurve && nearestCurve.distance < 100) {
+        // Slow down for curves
+        demoSpeed = Math.max(30, 70 - (6 - nearestCurve.severity) * 10);
+      } else {
+        demoSpeed = 70;
+      }
+      currentSpeed = demoSpeed;
+
+      // Update UI
+      speedEl.textContent = currentSpeed;
+      headingEl.textContent = getCompassDirection(currentHeading);
+
+      // Update user marker
+      updateUserMarker(currentPosition, currentHeading);
+
+      // Center map on user
+      map.easeTo({
+        center: currentPosition,
+        bearing: currentHeading,
+        duration: 200
+      });
+
+      // Update curve distances and check for callouts
+      updateCurveDistances();
+      checkForCallouts();
     }
 
     // Center map on user
