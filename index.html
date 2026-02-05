@@ -1008,9 +1008,24 @@
 
       const next = upcomingCurves[0];
 
-      // Calculate callout distance based on speed
-      // At higher speeds, call earlier
-      const calloutDistance = Math.max(50, Math.min(150, currentSpeed * 2));
+      // Calculate callout distance based on speed AND severity
+      // Tighter turns (lower severity number) need earlier warning
+      // Reaction time in seconds based on severity:
+      const reactionTime = {
+        1: 5.0,  // Hairpin/very tight - need 5 seconds to prepare
+        2: 4.5,  // Tight - 4.5 seconds
+        3: 4.0,  // Medium-tight - 4 seconds
+        4: 3.5,  // Medium-open - 3.5 seconds
+        5: 3.0,  // Fast - 3 seconds
+        6: 2.5   // Very fast - 2.5 seconds
+      };
+
+      // Convert speed (MPH) to m/s: mph * 0.447
+      const speedMs = currentSpeed * 0.447;
+      const severityReactionTime = reactionTime[next.severity] || 4;
+
+      // Distance = speed * reaction time, with minimum of 60m
+      const calloutDistance = Math.max(60, speedMs * severityReactionTime);
 
       if (next.distance <= calloutDistance && next.distance > 10) {
         if (lastSpokenCurve !== next) {
