@@ -871,14 +871,14 @@
           const dirShort = angleChange > 0 ? 'R' : 'L';
           const distanceFromStart = getRouteDistance(coordinates, 0, Math.floor((segmentStart + segmentEnd) / 2));
 
-          // Build the call in rally format
+          // Build the call in rally format: Direction first, then severity
           let call;
           if (isHairpin) {
-            call = `Hairpin ${direction}`;
+            call = `${direction} hairpin`;
           } else if (isSquare) {
-            call = `Square ${direction}`;
+            call = `${direction} square`;
           } else {
-            call = `${severity} ${direction}`;
+            call = `${direction} ${severity}`;
           }
 
           upcomingCurves.push({
@@ -914,16 +914,17 @@
         // If curves are close together and same direction
         const distBetween = Math.abs(current.distanceFromStart - next.distanceFromStart);
         if (distBetween < 150 && current.direction === next.direction) {
+          const dir = current.direction === 'R' ? 'right' : 'left';
           if (next.severity < current.severity) {
             // Tightens: starts fast, gets tighter
             current.modifier = 'tightens';
             current.tightensTo = next.severity;
-            current.call = `${current.severity} ${current.direction === 'R' ? 'right' : 'left'} tightens ${next.severity}`;
+            current.call = `${dir} ${current.severity} tightens ${next.severity}`;
           } else if (next.severity > current.severity) {
             // Opens: starts tight, gets faster
             current.modifier = 'opens';
             current.opensTo = next.severity;
-            current.call = `${current.severity} ${current.direction === 'R' ? 'right' : 'left'} opens ${next.severity}`;
+            current.call = `${dir} ${current.severity} opens ${next.severity}`;
           }
         }
       }
@@ -1081,17 +1082,17 @@
         text = `${Math.round(curve.distance / 10) * 10}. `;
       }
 
-      // Build the call
+      // Build the call: Direction first, then severity
       if (curve.isHairpin) {
-        text += `Hairpin ${direction}`;
+        text += `${direction} hairpin`;
       } else if (curve.isSquare) {
-        text += `Square ${direction}`;
+        text += `${direction} square`;
       } else if (curve.modifier === 'tightens') {
-        text += `${curve.severity} ${direction} tightens ${curve.tightensTo}`;
+        text += `${direction} ${curve.severity} tightens ${curve.tightensTo}`;
       } else if (curve.modifier === 'opens') {
-        text += `${curve.severity} ${direction} opens ${curve.opensTo}`;
+        text += `${direction} ${curve.severity} opens ${curve.opensTo}`;
       } else {
-        text += `${curve.severity} ${direction}`;
+        text += `${direction} ${curve.severity}`;
       }
 
       const utterance = new SpeechSynthesisUtterance(text);
