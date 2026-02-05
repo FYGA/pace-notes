@@ -428,7 +428,7 @@
     <div id="stats-row">
       <div class="stat-box">
         <div class="stat-value" id="speed-value">0</div>
-        <div class="stat-label">km/h</div>
+        <div class="stat-label">MPH</div>
       </div>
       <div class="stat-box">
         <div class="stat-value" id="heading-value">—</div>
@@ -474,7 +474,7 @@
     let isDemoMode = false;
     let demoInterval = null;
     let demoIndex = 0;
-    let demoSpeed = 60; // km/h
+    let demoSpeed = 45; // MPH
     let demoRouteData = []; // Will be populated from Mapbox
 
     // Demo route: Pikes Peak Hill Climb section (Colorado)
@@ -601,6 +601,38 @@
           }
         });
 
+        // Add curve markers source
+        map.addSource('curves', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+
+        map.addLayer({
+          id: 'curve-points',
+          type: 'circle',
+          source: 'curves',
+          paint: {
+            'circle-radius': 12,
+            'circle-color': ['get', 'color'],
+            'circle-stroke-width': 3,
+            'circle-stroke-color': '#fff'
+          }
+        });
+
+        map.addLayer({
+          id: 'curve-labels',
+          type: 'symbol',
+          source: 'curves',
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-size': 12,
+            'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold']
+          },
+          paint: {
+            'text-color': '#fff'
+          }
+        });
+
         legend.classList.add('visible');
         showStatus('Tap Start to begin tracking');
       });
@@ -660,7 +692,7 @@
 
       const { latitude, longitude, accuracy, heading, speed } = position.coords;
       currentPosition = [longitude, latitude];
-      currentSpeed = speed ? Math.round(speed * 3.6) : 0; // m/s to km/h
+      currentSpeed = speed ? Math.round(speed * 2.237) : 0; // m/s to MPH
       currentHeading = heading || 0;
 
       // Update accuracy indicator
@@ -844,6 +876,8 @@
       // Detect "tightens" and "opens" for consecutive curves
       detectCompoundCurves();
 
+      // Update map markers
+      updateCurveMarkers();
       curvesEl.textContent = upcomingCurves.length;
     }
 
@@ -882,6 +916,34 @@
       if (severity === 4) return `${angle}° - 4th gear, open`;
       if (severity === 5) return `${angle}° - 5th gear, fast`;
       return `${angle}° - 6th gear, flat out`;
+    }
+
+    // Update curve markers on map
+    function updateCurveMarkers() {
+      const features = upcomingCurves.map(curve => {
+        let label;
+        if (curve.isHairpin) {
+          label = `H${curve.direction}`;
+        } else if (curve.isSquare) {
+          label = `SQ${curve.direction}`;
+        } else {
+          label = `${curve.severity}${curve.direction}`;
+        }
+
+        return {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: curve.position },
+          properties: {
+            label,
+            color: curve.isHairpin ? '#dc2626' : getSeverityColor(curve.severity)
+          }
+        };
+      });
+
+      map.getSource('curves').setData({
+        type: 'FeatureCollection',
+        features
+      });
     }
 
     // Get color for severity
@@ -1129,13 +1191,13 @@
         currentHeading = getBearing(demoRouteData[demoIndex], demoRouteData[demoIndex + 1]);
       }
 
-      // Simulate speed (vary based on curve severity)
+      // Simulate speed (vary based on curve severity) - in MPH
       const nearestCurve = upcomingCurves[0];
       if (nearestCurve && nearestCurve.distance < 100) {
         // Slow down for curves
-        demoSpeed = Math.max(30, 70 - (6 - nearestCurve.severity) * 10);
+        demoSpeed = Math.max(20, 45 - (6 - nearestCurve.severity) * 6);
       } else {
-        demoSpeed = 70;
+        demoSpeed = 45;
       }
       currentSpeed = demoSpeed;
 
