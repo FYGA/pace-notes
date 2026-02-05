@@ -498,51 +498,11 @@
     let demoInterval = null;
     let demoIndex = 0;
     let demoSpeed = 60; // km/h
+    let demoRouteData = []; // Will be populated from Mapbox
 
-    // Demo route: Dense mountain road with proper curve detection
-    // Points ~20-30m apart, curves have many points for proper detection
-    const DEMO_ROUTE = [
-      // === STRAIGHT NORTH (200m) ===
-      [10.4500, 46.5100], [10.4500, 46.5102], [10.4500, 46.5104], [10.4500, 46.5106],
-      [10.4500, 46.5108], [10.4500, 46.5110], [10.4500, 46.5112], [10.4500, 46.5114],
-      [10.4500, 46.5116], [10.4500, 46.5118],
-      // === HAIRPIN RIGHT (180° turn) ===
-      [10.4501, 46.5120], [10.4503, 46.5121], [10.4505, 46.5122], [10.4508, 46.5122],
-      [10.4511, 46.5121], [10.4514, 46.5120], [10.4516, 46.5118], [10.4517, 46.5116],
-      [10.4518, 46.5114],
-      // === STRAIGHT SOUTH (200m) ===
-      [10.4518, 46.5112], [10.4518, 46.5110], [10.4518, 46.5108], [10.4518, 46.5106],
-      [10.4518, 46.5104], [10.4518, 46.5102], [10.4518, 46.5100], [10.4518, 46.5098],
-      [10.4518, 46.5096], [10.4518, 46.5094],
-      // === HAIRPIN LEFT (180° turn) ===
-      [10.4519, 46.5092], [10.4521, 46.5091], [10.4524, 46.5090], [10.4527, 46.5090],
-      [10.4530, 46.5091], [10.4532, 46.5092], [10.4534, 46.5094], [10.4535, 46.5096],
-      [10.4536, 46.5098],
-      // === STRAIGHT NORTH (150m) ===
-      [10.4536, 46.5100], [10.4536, 46.5102], [10.4536, 46.5104], [10.4536, 46.5106],
-      [10.4536, 46.5108], [10.4536, 46.5110], [10.4536, 46.5112],
-      // === MEDIUM RIGHT (90° turn) ===
-      [10.4537, 46.5114], [10.4539, 46.5115], [10.4541, 46.5116], [10.4544, 46.5116],
-      [10.4547, 46.5116], [10.4550, 46.5116],
-      // === STRAIGHT EAST (150m) ===
-      [10.4553, 46.5116], [10.4556, 46.5116], [10.4559, 46.5116], [10.4562, 46.5116],
-      [10.4565, 46.5116], [10.4568, 46.5116], [10.4571, 46.5116],
-      // === TIGHT LEFT (90° turn) ===
-      [10.4573, 46.5117], [10.4574, 46.5119], [10.4575, 46.5121], [10.4575, 46.5124],
-      [10.4575, 46.5127],
-      // === STRAIGHT NORTH (100m) ===
-      [10.4575, 46.5130], [10.4575, 46.5133], [10.4575, 46.5136], [10.4575, 46.5139],
-      // === FAST RIGHT (45° bend) ===
-      [10.4576, 46.5141], [10.4578, 46.5143], [10.4580, 46.5144], [10.4583, 46.5145],
-      // === STRAIGHT NE (100m) ===
-      [10.4586, 46.5146], [10.4589, 46.5147], [10.4592, 46.5148], [10.4595, 46.5149],
-      // === HAIRPIN LEFT (160° turn) ===
-      [10.4597, 46.5150], [10.4598, 46.5152], [10.4598, 46.5154], [10.4597, 46.5156],
-      [10.4595, 46.5157], [10.4592, 46.5158], [10.4589, 46.5157], [10.4587, 46.5155],
-      // === STRAIGHT SW (150m) ===
-      [10.4585, 46.5153], [10.4583, 46.5151], [10.4581, 46.5149], [10.4579, 46.5147],
-      [10.4577, 46.5145], [10.4575, 46.5143], [10.4573, 46.5141]
-    ];
+    // Demo route: Pikes Peak Hill Climb section (Colorado)
+    const DEMO_START = [-105.0675561764574, 38.86176996714182];
+    const DEMO_END = [-105.04432838005656, 38.8397878232719];
 
     // DOM elements
     const distanceEl = document.getElementById('distance-to-call');
@@ -1076,16 +1036,45 @@
     }
 
     // Start demo mode
-    function startDemo() {
+    async function startDemo() {
       // Stop real tracking if active
       if (isTracking) {
         stopTracking();
       }
 
-      isDemoMode = true;
-      demoIndex = 0;
       const demoBtn = document.getElementById('demo-btn');
       demoBtn.classList.add('active');
+      demoBtn.innerHTML = '<span>⏳</span> Loading...';
+
+      showStatus('Fetching Pikes Peak route...');
+
+      try {
+        // Fetch real route from Mapbox Directions API
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${DEMO_START[0]},${DEMO_START[1]};${DEMO_END[0]},${DEMO_END[1]}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!data.routes || !data.routes[0]) {
+          throw new Error('No route found');
+        }
+
+        demoRouteData = data.routes[0].geometry.coordinates;
+
+        if (demoRouteData.length < 10) {
+          throw new Error('Route too short');
+        }
+
+      } catch (error) {
+        console.error('Error fetching demo route:', error);
+        showStatus('Error loading route');
+        demoBtn.classList.remove('active');
+        demoBtn.innerHTML = '<span>🎬</span> Demo';
+        setTimeout(hideStatus, 2000);
+        return;
+      }
+
+      isDemoMode = true;
+      demoIndex = 0;
       demoBtn.innerHTML = '<span>⏹</span> Stop Demo';
 
       // Show GPS indicator for demo
@@ -1094,29 +1083,29 @@
       gpsDot.className = 'gps-dot good';
 
       // Set initial position and center map
-      currentPosition = DEMO_ROUTE[0];
-      routeCoordinates = DEMO_ROUTE;
+      currentPosition = demoRouteData[0];
+      routeCoordinates = demoRouteData;
 
       // Update route on map
       map.getSource('route').setData({
         type: 'Feature',
-        geometry: { type: 'LineString', coordinates: DEMO_ROUTE }
+        geometry: { type: 'LineString', coordinates: demoRouteData }
       });
 
       // Analyze curves in demo route
-      analyzeCurves(DEMO_ROUTE);
+      analyzeCurves(demoRouteData);
 
       // Center map on start
       map.flyTo({
-        center: DEMO_ROUTE[0],
+        center: demoRouteData[0],
         zoom: 16,
         pitch: 60,
-        bearing: getBearing(DEMO_ROUTE[0], DEMO_ROUTE[1])
+        bearing: getBearing(demoRouteData[0], demoRouteData[1])
       });
 
       // Start simulation loop (update every 200ms for smooth animation)
       demoInterval = setInterval(simulateDemoMovement, 200);
-      showStatus('Demo: Mountain Road');
+      showStatus('Demo: Pikes Peak Hill Climb');
       setTimeout(hideStatus, 2000);
     }
 
@@ -1145,22 +1134,24 @@
 
     // Simulate movement along demo route
     function simulateDemoMovement() {
-      if (!isDemoMode || demoIndex >= DEMO_ROUTE.length - 1) {
-        if (demoIndex >= DEMO_ROUTE.length - 1) {
+      if (!isDemoMode || demoRouteData.length === 0 || demoIndex >= demoRouteData.length - 1) {
+        if (demoIndex >= demoRouteData.length - 1) {
           // Loop back to start
           demoIndex = 0;
           lastSpokenCurve = null;
+          // Re-analyze curves for fresh display
+          analyzeCurves(demoRouteData);
         }
         return;
       }
 
       // Move to next point
       demoIndex++;
-      currentPosition = DEMO_ROUTE[demoIndex];
+      currentPosition = demoRouteData[demoIndex];
 
       // Calculate heading to next point
-      if (demoIndex < DEMO_ROUTE.length - 1) {
-        currentHeading = getBearing(DEMO_ROUTE[demoIndex], DEMO_ROUTE[demoIndex + 1]);
+      if (demoIndex < demoRouteData.length - 1) {
+        currentHeading = getBearing(demoRouteData[demoIndex], demoRouteData[demoIndex + 1]);
       }
 
       // Simulate speed (vary based on curve severity)
