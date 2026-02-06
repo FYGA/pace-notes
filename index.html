@@ -486,12 +486,20 @@
     let currentSpeed = 0;
     let currentHeading = 0;
     let lastFetchPosition = null;
+    let lastFetchHeading = null;
+    let lastFetchTime = 0;
     let upcomingCurves = [];
     let lastSpokenCurve = null;
     let routeCoordinates = [];
     let userMarker = null;
     let curveMarkers = [];
     let routeLine = null;
+    let positionHistory = []; // Track recent GPS positions for heading computation
+    const POSITION_HISTORY_MAX = 10;
+    const REFETCH_DISTANCE_M = 50;       // Re-fetch after moving 50m
+    const REFETCH_HEADING_DEG = 25;      // Re-fetch when heading changes 25°+
+    const REFETCH_INTERVAL_MS = 10000;   // Re-fetch at least every 10 seconds
+    const LOOK_AHEAD_KM = 2;            // Look 2km ahead instead of 1km
 
     // Demo mode state
     let isDemoMode = false;
@@ -706,6 +714,14 @@
         return;
       }
 
+      // Reset state for fresh tracking session
+      positionHistory = [];
+      lastFetchPosition = null;
+      lastFetchHeading = null;
+      lastFetchTime = 0;
+      upcomingCurves = [];
+      lastSpokenCurve = null;
+
       showStatus('Acquiring GPS...');
       gpsAccuracy.style.display = 'flex';
 
@@ -745,7 +761,24 @@
       const { latitude, longitude, accuracy, heading, speed } = position.coords;
       currentPosition = [longitude, latitude];
       currentSpeed = speed ? Math.round(speed * 3.6) : 0; // m/s to km/h
-      currentHeading = heading || 0;
+
+      // Track position history for computing heading from movement
+      const now = Date.now();
+      positionHistory.push({ position: [longitude, latitude], time: now });
+      if (positionHistory.length > POSITION_HISTORY_MAX) {
+        positionHistory.shift();
+      }
+
+      // Compute heading: prefer movement-based heading over GPS heading
+      // GPS heading is unreliable at low speeds
+      const movementHeading = computeMovementHeading();
+      if (movementHeading !== null && currentSpeed > 3) {
+        // Use movement heading when we have enough data and are actually moving
+        currentHeading = movementHeading;
+      } else if (heading !== null && heading !== undefined && !isNaN(heading)) {
+        currentHeading = heading;
+      }
+      // Otherwise keep the last known heading (don't reset to 0)
 
       // Update accuracy indicator
       updateAccuracyIndicator(accuracy);
@@ -764,15 +797,55 @@
         duration: 500
       });
 
-      // Fetch road data if moved enough (50m)
-      if (!lastFetchPosition || getDistance(lastFetchPosition, currentPosition) > 50) {
+      // Determine if we should re-fetch road data
+      const shouldRefetch = needsRefetch(now);
+      if (shouldRefetch) {
         await fetchRoadAhead();
-        lastFetchPosition = currentPosition;
+        lastFetchPosition = [...currentPosition];
+        lastFetchHeading = currentHeading;
+        lastFetchTime = now;
       }
 
       // Update curve distances and check for callouts
       updateCurveDistances();
       checkForCallouts();
+    }
+
+    // Compute heading from recent position history (more reliable than GPS heading)
+    function computeMovementHeading() {
+      if (positionHistory.length < 3) return null;
+
+      // Use a point from a few samples back vs the latest, to smooth out GPS jitter
+      const recent = positionHistory[positionHistory.length - 1];
+      // Go back ~3-5 samples for a stable heading
+      const older = positionHistory[Math.max(0, positionHistory.length - 4)];
+
+      const dist = getDistance(older.position, recent.position) * 1000; // meters
+      if (dist < 5) return null; // Not enough movement to determine heading
+
+      return getBearing(older.position, recent.position);
+    }
+
+    // Determine if road data needs to be re-fetched
+    function needsRefetch(now) {
+      // First fetch
+      if (!lastFetchPosition) return true;
+
+      // Moved far enough
+      const distMoved = getDistance(lastFetchPosition, currentPosition) * 1000;
+      if (distMoved > REFETCH_DISTANCE_M) return true;
+
+      // Heading changed significantly (turned onto a new road)
+      if (lastFetchHeading !== null) {
+        let headingDelta = Math.abs(currentHeading - lastFetchHeading);
+        if (headingDelta > 180) headingDelta = 360 - headingDelta;
+        if (headingDelta > REFETCH_HEADING_DEG) return true;
+      }
+
+      // Time-based fallback (catch any edge cases)
+      if (now - lastFetchTime > REFETCH_INTERVAL_MS) return true;
+
+      return false;
     }
 
     // Update GPS accuracy indicator
@@ -806,18 +879,56 @@
     async function fetchRoadAhead() {
       if (!currentPosition) return;
 
-      // Create a point ~1km ahead based on heading
-      const lookAheadDistance = 1; // km
-      const aheadPoint = getPointAhead(currentPosition, currentHeading || 0, lookAheadDistance);
+      // Build waypoints: use a "behind" point to anchor to the correct road,
+      // then current position, then a point ahead.
+      // This tells the Directions API which road/direction we're actually traveling.
+      const heading = currentHeading || 0;
+      const aheadPoint = getPointAhead(currentPosition, heading, LOOK_AHEAD_KM);
+
+      // Create a behind point from position history if available, otherwise compute one
+      let behindPoint = null;
+      if (positionHistory.length >= 3) {
+        // Use an actual past position ~50-100m back for best accuracy
+        for (let i = positionHistory.length - 3; i >= 0; i--) {
+          const dist = getDistance(positionHistory[i].position, currentPosition) * 1000;
+          if (dist > 30) {
+            behindPoint = positionHistory[i].position;
+            break;
+          }
+        }
+      }
+      if (!behindPoint) {
+        // Synthesize a behind point from heading (fallback)
+        const reverseHeading = (heading + 180) % 360;
+        behindPoint = getPointAhead(currentPosition, reverseHeading, 0.05); // 50m behind
+      }
 
       try {
-        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${currentPosition[0]},${currentPosition[1]};${aheadPoint[0]},${aheadPoint[1]}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
+        // Use 3 waypoints: behind → current → ahead
+        // This anchors the route to the road we're actually on and traveling in the right direction
+        const coords = `${behindPoint[0]},${behindPoint[1]};${currentPosition[0]},${currentPosition[1]};${aheadPoint[0]},${aheadPoint[1]}`;
+        const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
 
         const response = await fetch(url);
         const data = await response.json();
 
         if (data.routes && data.routes[0]) {
-          routeCoordinates = data.routes[0].geometry.coordinates;
+          const fullRoute = data.routes[0].geometry.coordinates;
+
+          // Find the closest point on the route to our current position
+          // and only keep the portion ahead of us
+          let closestIdx = 0;
+          let closestDist = Infinity;
+          for (let i = 0; i < fullRoute.length; i++) {
+            const d = getDistance(currentPosition, fullRoute[i]);
+            if (d < closestDist) {
+              closestDist = d;
+              closestIdx = i;
+            }
+          }
+
+          // Keep only the road ahead (from closest point onward)
+          routeCoordinates = fullRoute.slice(Math.max(0, closestIdx - 1));
 
           // Update route on map
           map.getSource('route').setData({
@@ -825,7 +936,7 @@
             geometry: { type: 'LineString', coordinates: routeCoordinates }
           });
 
-          // Analyze curves
+          // Analyze curves — clear old ones and replace
           analyzeCurves(routeCoordinates);
         }
       } catch (error) {
@@ -836,6 +947,7 @@
     // Analyze road geometry for curves
     function analyzeCurves(coordinates) {
       upcomingCurves = [];
+      lastSpokenCurve = null; // Reset spoken curve on new data
 
       if (coordinates.length < 3) return;
 
@@ -868,8 +980,6 @@
         const absAngle = Math.abs(angleChange);
 
         if (absAngle >= minAngleChange) {
-          // Calculate severity (1-6 scale based on angle)
-          // Sharper angles = lower severity number
           let severity;
           if (absAngle >= 120) severity = 1;      // Hairpin
           else if (absAngle >= 90) severity = 2;  // Tight
@@ -879,14 +989,18 @@
           else severity = 6;                       // Very fast
 
           const direction = angleChange > 0 ? 'R' : 'L';
-          const distanceFromStart = getRouteDistance(coordinates, 0, Math.floor((segmentStart + segmentEnd) / 2));
+          const curvePointIdx = Math.floor((segmentStart + segmentEnd) / 2);
+          // Store the route index so we can compute along-route distance later
+          const distanceFromStart = getRouteDistance(coordinates, 0, curvePointIdx);
 
           upcomingCurves.push({
-            position: coordinates[Math.floor((segmentStart + segmentEnd) / 2)],
+            position: coordinates[curvePointIdx],
+            routeIndex: curvePointIdx,
             severity,
             direction,
             angle: Math.round(absAngle),
             distanceFromStart,
+            distance: Math.round(distanceFromStart), // along-route distance from start of route segment
             call: `${severity} ${direction === 'L' ? 'Left' : 'Right'}`,
             description: getCurveDescription(severity, absAngle)
           });
@@ -936,20 +1050,39 @@
       return colors[severity] || '#888';
     }
 
-    // Update distances to curves
+    // Update distances to curves using along-route distance
     function updateCurveDistances() {
-      if (!currentPosition || upcomingCurves.length === 0) return;
+      if (!currentPosition || upcomingCurves.length === 0 || routeCoordinates.length < 2) return;
 
-      // Calculate distance to each curve
+      // Find closest point on route to current position
+      let closestIdx = 0;
+      let closestDist = Infinity;
+      for (let i = 0; i < routeCoordinates.length; i++) {
+        const d = getDistance(currentPosition, routeCoordinates[i]);
+        if (d < closestDist) {
+          closestDist = d;
+          closestIdx = i;
+        }
+      }
+
+      // Calculate along-route distance from our position to each curve
       upcomingCurves.forEach(curve => {
-        curve.distance = Math.round(getDistance(currentPosition, curve.position) * 1000);
+        if (curve.routeIndex > closestIdx) {
+          // Curve is ahead — compute along-route distance
+          curve.distance = Math.round(getRouteDistance(routeCoordinates, closestIdx, curve.routeIndex));
+        } else {
+          // Curve is behind us — mark with negative distance
+          curve.distance = -Math.round(getRouteDistance(routeCoordinates, curve.routeIndex, closestIdx));
+        }
       });
 
-      // Sort by distance
+      // Sort by distance (nearest first)
       upcomingCurves.sort((a, b) => a.distance - b.distance);
 
-      // Filter out passed curves
+      // Filter out passed curves (behind us by more than 20m)
       upcomingCurves = upcomingCurves.filter(c => c.distance > -20);
+
+      curvesEl.textContent = upcomingCurves.length;
 
       // Update UI
       updateUpcomingDisplay();
@@ -1071,6 +1204,7 @@
 
       isDemoMode = true;
       demoIndex = 0;
+      positionHistory = []; // Reset position history for demo
       const demoBtn = document.getElementById('demo-btn');
       demoBtn.classList.add('active');
       demoBtn.innerHTML = '<span>⏹</span> Stop Demo';
@@ -1132,18 +1266,25 @@
 
     // Simulate movement along demo route
     function simulateDemoMovement() {
-      if (!isDemoMode || demoIndex >= DEMO_ROUTE.length - 1) {
-        if (demoIndex >= DEMO_ROUTE.length - 1) {
-          // Loop back to start
-          demoIndex = 0;
-          lastSpokenCurve = null;
-        }
+      if (!isDemoMode) return;
+
+      if (demoIndex >= DEMO_ROUTE.length - 1) {
+        // Loop back to start
+        demoIndex = 0;
+        lastSpokenCurve = null;
+        positionHistory = [];
         return;
       }
 
       // Move to next point
       demoIndex++;
       currentPosition = DEMO_ROUTE[demoIndex];
+
+      // Track position history for demo too
+      positionHistory.push({ position: [...currentPosition], time: Date.now() });
+      if (positionHistory.length > POSITION_HISTORY_MAX) {
+        positionHistory.shift();
+      }
 
       // Calculate heading to next point
       if (demoIndex < DEMO_ROUTE.length - 1) {
