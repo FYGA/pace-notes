@@ -65,7 +65,11 @@ function analyzeCurves(coordinates) {
 
       const direction = angleChange > 0 ? 'right' : 'left';
       const dirShort = angleChange > 0 ? 'R' : 'L';
-      const curvePointIdx = Math.floor((segmentStart + segmentEnd) / 2);
+      // Use the turn-in point (entry of curve), not the midpoint
+      // segmentStart is where the road is still straight; the curve begins
+      // shortly after, so offset a few points in to mark the actual entry
+      const curveEntryOffset = Math.min(3, Math.floor((segmentEnd - segmentStart) * 0.15));
+      const curvePointIdx = segmentStart + curveEntryOffset;
       const distanceFromStart = getRouteDistance(coordinates, 0, curvePointIdx);
 
       // Build the call in rally format: Direction first, then severity
