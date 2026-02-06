@@ -371,6 +371,83 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
     }
+
+    /* Approach glow - screen edges light up on curve approach */
+    #approach-glow {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 95;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    #approach-glow.left {
+      box-shadow: inset 60px 0 80px -20px var(--glow-color, #ef4444);
+    }
+
+    #approach-glow.right {
+      box-shadow: inset -60px 0 80px -20px var(--glow-color, #ef4444);
+    }
+
+    /* Callout text transition */
+    #call-text {
+      transition: transform 0.2s ease-out, opacity 0.2s;
+    }
+
+    #call-text.flash {
+      transform: scale(1.08);
+    }
+
+    /* Session stats */
+    #session-stats {
+      position: fixed;
+      top: max(20px, env(safe-area-inset-top));
+      left: 20px;
+      background: rgba(20, 20, 30, 0.85);
+      padding: 8px 14px;
+      border-radius: 12px;
+      font-size: 11px;
+      z-index: 110;
+      backdrop-filter: blur(10px);
+      display: none;
+      font-family: 'SF Mono', monospace;
+      line-height: 1.6;
+    }
+
+    #session-stats.visible {
+      display: block;
+    }
+
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .stat-row .label {
+      color: #888;
+    }
+
+    .stat-row .val {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    /* Wake lock indicator */
+    #wake-lock-indicator {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #666;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+
+    #wake-lock-indicator.active {
+      background: #22c55e;
+    }
   </style>
 </head>
 <body>
@@ -398,10 +475,22 @@
   <!-- Map -->
   <div id="map"></div>
 
+  <!-- Approach Glow -->
+  <div id="approach-glow"></div>
+
   <!-- GPS Accuracy -->
   <div id="gps-accuracy" style="display: none;">
     <div class="gps-dot good"></div>
     <span id="accuracy-text">GPS</span>
+    <span id="wake-lock-indicator" title="Screen wake lock"></span>
+  </div>
+
+  <!-- Session Stats -->
+  <div id="session-stats">
+    <div class="stat-row"><span class="label">DIST</span><span class="val" id="session-dist">0.0 mi</span></div>
+    <div class="stat-row"><span class="label">TIME</span><span class="val" id="session-time">0:00</span></div>
+    <div class="stat-row"><span class="label">TURNS</span><span class="val" id="session-turns">0</span></div>
+    <div class="stat-row"><span class="label">TOP</span><span class="val" id="session-top">0 mph</span></div>
   </div>
 
   <!-- HUD -->
@@ -480,6 +569,13 @@
     let routeLine = null;
     let positionHistory = [];
     let speechUnlocked = false; // iOS requires user gesture to unlock speechSynthesis
+    let wakeLock = null; // Screen Wake Lock API
+    let audioCtx = null; // Web Audio API for beep tones
+    let sessionStartTime = null;
+    let sessionDistance = 0; // miles
+    let sessionTopSpeed = 0;
+    let sessionTurnsPassed = 0;
+    let lastSessionPosition = null;
     let isRecording = false;
     let recordedTrack = []; // GPS breadcrumbs
     let recordedNotes = []; // Pace notes encountered during recording
@@ -615,9 +711,9 @@
           type: 'line',
           source: 'route',
           paint: {
-            'line-color': '#3b82f6',
+            'line-color': ['coalesce', ['get', 'color'], '#3b82f6'],
             'line-width': 6,
-            'line-opacity': 0.7
+            'line-opacity': 0.8
           }
         });
 
@@ -716,6 +812,8 @@
       upcomingCurves = [];
       lastSpokenCurve = null;
 
+      requestWakeLock();
+      startSession();
       showStatus('Acquiring GPS...');
       gpsAccuracy.style.display = 'flex';
 
@@ -745,6 +843,8 @@
       startBtn.className = 'start';
       startBtn.innerHTML = '<span>▶</span> Start';
       gpsAccuracy.style.display = 'none';
+      releaseWakeLock();
+      stopSession();
       hideStatus();
     }
 
@@ -803,9 +903,15 @@
       // Record GPS breadcrumb
       recordTrackPoint();
 
+      // Update session stats
+      updateSessionStats();
+
       // Update curve distances and check for callouts
       updateCurveDistances();
       checkForCallouts();
+
+      // Visual approach indicator
+      updateApproachGlow();
     }
 
     // Compute heading from recent position history (more reliable than GPS heading)
@@ -906,14 +1012,11 @@
 
           routeCoordinates = fullRoute.slice(Math.max(0, closestIdx - 1));
 
-          // Update route on map
-          map.getSource('route').setData({
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: routeCoordinates }
-          });
-
-          // Analyze curves
+          // Analyze curves first (so color-coded route has curve data)
           analyzeCurves(routeCoordinates);
+
+          // Update route on map with color-coded segments
+          updateColoredRoute();
         }
       } catch (error) {
         console.error('Error fetching road data:', error);
@@ -1286,6 +1389,17 @@
     function speakCurve(curve) {
       if (!('speechSynthesis' in window)) return;
 
+      // Pre-callout beep and haptics
+      playBeep(curve.severity);
+      triggerHaptic(curve.severity);
+
+      // Flash the callout text
+      callTextEl.classList.add('flash');
+      setTimeout(() => callTextEl.classList.remove('flash'), 200);
+
+      // Track turns passed in session
+      sessionTurnsPassed++;
+
       window.speechSynthesis.cancel();
 
       let text = buildCallText(curve);
@@ -1381,6 +1495,9 @@
       positionHistory = [];
       demoBtn.innerHTML = '<span>⏹</span> Stop Demo';
 
+      requestWakeLock();
+      startSession();
+
       // Show GPS indicator for demo
       gpsAccuracy.style.display = 'flex';
       accuracyText.textContent = 'DEMO';
@@ -1390,14 +1507,9 @@
       currentPosition = demoRouteData[0];
       routeCoordinates = demoRouteData;
 
-      // Update route on map
-      map.getSource('route').setData({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: demoRouteData }
-      });
-
-      // Analyze curves in demo route
+      // Analyze curves in demo route, then color-code the route
       analyzeCurves(demoRouteData);
+      updateColoredRoute();
 
       // Center map ahead of start (so user appears in lower third)
       const startBearing = getBearing(demoRouteData[0], demoRouteData[1]);
@@ -1427,6 +1539,9 @@
       demoBtn.classList.remove('active');
       demoBtn.innerHTML = '<span>🎬</span> Demo';
       gpsAccuracy.style.display = 'none';
+      releaseWakeLock();
+      stopSession();
+      document.getElementById('approach-glow').style.opacity = '0';
 
       // Reset display
       distanceEl.textContent = '—';
@@ -1494,6 +1609,7 @@
       // Update curve distances and check for callouts
       updateCurveDistances();
       checkForCallouts();
+      updateApproachGlow();
     }
 
     // Toggle route recording
@@ -1621,6 +1737,205 @@
       showStatus(message);
     }
 
+    // === SCREEN WAKE LOCK ===
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+          document.getElementById('wake-lock-indicator').classList.add('active');
+          wakeLock.addEventListener('release', () => {
+            document.getElementById('wake-lock-indicator').classList.remove('active');
+          });
+        }
+      } catch (err) {
+        console.log('Wake lock failed:', err);
+      }
+    }
+
+    function releaseWakeLock() {
+      if (wakeLock) {
+        wakeLock.release();
+        wakeLock = null;
+      }
+    }
+
+    // Re-acquire wake lock when tab becomes visible again (iOS releases it on tab switch)
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && (isTracking || isDemoMode)) {
+        requestWakeLock();
+      }
+    });
+
+    // === AUDIO BEEP TONE (Web Audio API) ===
+    function initAudio() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    // Play a short beep before voice callouts
+    function playBeep(severity) {
+      if (!audioCtx || !soundEnabled) return;
+      try {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+
+        // Higher pitch for tighter curves (more urgent)
+        const freq = severity <= 2 ? 880 : severity <= 4 ? 660 : 520;
+        osc.frequency.value = freq;
+        osc.type = 'sine';
+
+        gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+
+        osc.start(audioCtx.currentTime);
+        osc.stop(audioCtx.currentTime + 0.15);
+      } catch (e) {
+        // Audio context issues are non-critical
+      }
+    }
+
+    // === HAPTIC FEEDBACK ===
+    function triggerHaptic(severity) {
+      if (!navigator.vibrate) return;
+      if (severity <= 1) {
+        navigator.vibrate([100, 50, 100, 50, 100]); // triple pulse for hairpin
+      } else if (severity <= 2) {
+        navigator.vibrate([100, 50, 100]); // double pulse for tight
+      } else if (severity <= 3) {
+        navigator.vibrate(80); // single pulse for medium
+      }
+    }
+
+    // === APPROACH GLOW ===
+    function updateApproachGlow() {
+      const glow = document.getElementById('approach-glow');
+      if (upcomingCurves.length === 0) {
+        glow.style.opacity = '0';
+        glow.className = '';
+        return;
+      }
+
+      const next = upcomingCurves[0];
+      const maxGlowDist = 150; // Start glowing at 150m
+
+      if (next.distance < maxGlowDist && next.distance > 0 && next.severity <= 4) {
+        const intensity = Math.max(0, 1 - (next.distance / maxGlowDist));
+        const color = getSeverityColor(next.severity);
+        glow.style.setProperty('--glow-color', color);
+        glow.style.opacity = (intensity * 0.7).toFixed(2);
+        glow.className = next.direction === 'L' ? 'left' : 'right';
+      } else {
+        glow.style.opacity = '0';
+        glow.className = '';
+      }
+    }
+
+    // === SESSION STATS ===
+    function startSession() {
+      sessionStartTime = Date.now();
+      sessionDistance = 0;
+      sessionTopSpeed = 0;
+      sessionTurnsPassed = 0;
+      lastSessionPosition = null;
+      document.getElementById('session-stats').classList.add('visible');
+      updateSessionDisplay();
+    }
+
+    function stopSession() {
+      document.getElementById('session-stats').classList.remove('visible');
+    }
+
+    function updateSessionStats() {
+      if (!sessionStartTime || !currentPosition) return;
+
+      // Accumulate distance
+      if (lastSessionPosition) {
+        const segDist = getDistance(lastSessionPosition, currentPosition); // km
+        sessionDistance += segDist * 0.621371; // to miles
+      }
+      lastSessionPosition = [...currentPosition];
+
+      // Track top speed
+      if (currentSpeed > sessionTopSpeed) {
+        sessionTopSpeed = currentSpeed;
+      }
+
+      updateSessionDisplay();
+    }
+
+    function updateSessionDisplay() {
+      if (!sessionStartTime) return;
+      const elapsed = Date.now() - sessionStartTime;
+      const mins = Math.floor(elapsed / 60000);
+      const secs = Math.floor((elapsed % 60000) / 1000);
+
+      document.getElementById('session-dist').textContent = `${sessionDistance.toFixed(1)} mi`;
+      document.getElementById('session-time').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+      document.getElementById('session-turns').textContent = sessionTurnsPassed;
+      document.getElementById('session-top').textContent = `${sessionTopSpeed} mph`;
+    }
+
+    // === COLOR-CODED ROUTE LINE ===
+    function updateColoredRoute() {
+      if (!routeCoordinates || routeCoordinates.length < 2) return;
+
+      // Build segments colored by proximity to curves
+      // Default is blue, near curves it changes to severity color
+      const segments = [];
+      let currentSegment = { coords: [routeCoordinates[0]], color: '#3b82f6' };
+
+      for (let i = 1; i < routeCoordinates.length; i++) {
+        // Find nearest curve to this point
+        let nearestSeverity = null;
+        let nearestDist = Infinity;
+
+        for (const curve of upcomingCurves) {
+          const d = Math.abs(i - curve.routeIndex);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearestSeverity = curve.severity;
+          }
+        }
+
+        // Color based on proximity to curve (within ~5 route points)
+        let color = '#3b82f6'; // default blue
+        if (nearestDist <= 5 && nearestSeverity !== null) {
+          color = getSeverityColor(nearestSeverity);
+        }
+
+        if (color !== currentSegment.color) {
+          // Bridge: add the current point to close the old segment
+          currentSegment.coords.push(routeCoordinates[i]);
+          segments.push(currentSegment);
+          currentSegment = { coords: [routeCoordinates[i]], color };
+        } else {
+          currentSegment.coords.push(routeCoordinates[i]);
+        }
+      }
+      segments.push(currentSegment);
+
+      // Build a GeoJSON FeatureCollection with colored segments
+      const features = segments
+        .filter(s => s.coords.length >= 2)
+        .map(s => ({
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: s.coords },
+          properties: { color: s.color }
+        }));
+
+      // Update the route source — switch to using line-color from properties
+      map.getSource('route').setData({
+        type: 'FeatureCollection',
+        features
+      });
+    }
+
     // Show/hide status
     function showStatus(text) {
       statusText.textContent = text;
@@ -1682,13 +1997,16 @@
     function toRad(deg) { return deg * Math.PI / 180; }
     function toDeg(rad) { return rad * 180 / Math.PI; }
 
-    // Unlock speechSynthesis on iOS (requires user gesture)
+    // Unlock speechSynthesis and audio on iOS (requires user gesture)
     function unlockSpeech() {
-      if (speechUnlocked || !('speechSynthesis' in window)) return;
-      const utterance = new SpeechSynthesisUtterance('');
-      utterance.volume = 0;
-      window.speechSynthesis.speak(utterance);
-      speechUnlocked = true;
+      if (!speechUnlocked && 'speechSynthesis' in window) {
+        const utterance = new SpeechSynthesisUtterance('');
+        utterance.volume = 0;
+        window.speechSynthesis.speak(utterance);
+        speechUnlocked = true;
+      }
+      // Also init Web Audio on first tap
+      initAudio();
     }
 
     // Attach unlock to all interactive buttons (covers first tap regardless of which button)
