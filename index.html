@@ -266,7 +266,7 @@
       color: white;
     }
 
-    #sound-btn, #center-btn, #settings-btn {
+    #sound-btn, #center-btn, #settings-btn, #refresh-btn, #record-btn {
       width: 56px;
       height: 56px;
       border-radius: 14px;
@@ -280,6 +280,11 @@
 
     #sound-btn.muted {
       color: #666;
+    }
+
+    #record-btn.recording {
+      background: #ef4444;
+      animation: pulse 1.5s infinite;
     }
 
     #settings-btn {
@@ -447,6 +452,8 @@
         <span>🎬</span> Demo
       </button>
       <button id="sound-btn" onclick="toggleSound()">🔊</button>
+      <button id="refresh-btn" onclick="refreshRoute()">↻</button>
+      <button id="record-btn" onclick="toggleRecording()">⏺</button>
       <button id="center-btn" onclick="centerOnUser()">◎</button>
       <button id="settings-btn" onclick="openSettings()">⚙</button>
     </div>
@@ -472,6 +479,11 @@
     let curveMarkers = [];
     let routeLine = null;
     let positionHistory = [];
+    let speechUnlocked = false; // iOS requires user gesture to unlock speechSynthesis
+    let isRecording = false;
+    let recordedTrack = []; // GPS breadcrumbs
+    let recordedNotes = []; // Pace notes encountered during recording
+    let recordingStartTime = null;
     const POSITION_HISTORY_MAX = 10;
     const REFETCH_DISTANCE_M = 50;
     const REFETCH_HEADING_DEG = 25;
@@ -641,6 +653,40 @@
           }
         });
 
+        // Add brake point markers
+        map.addSource('brakepoints', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] }
+        });
+
+        map.addLayer({
+          id: 'brakepoint-markers',
+          type: 'circle',
+          source: 'brakepoints',
+          paint: {
+            'circle-radius': 6,
+            'circle-color': '#ef4444',
+            'circle-stroke-width': 2,
+            'circle-stroke-color': '#fca5a5',
+            'circle-opacity': 0.8
+          }
+        });
+
+        map.addLayer({
+          id: 'brakepoint-labels',
+          type: 'symbol',
+          source: 'brakepoints',
+          layout: {
+            'text-field': 'B',
+            'text-size': 9,
+            'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+            'text-offset': [0, -1.5]
+          },
+          paint: {
+            'text-color': '#fca5a5'
+          }
+        });
+
         legend.classList.add('visible');
         showStatus('Tap Start to begin tracking');
       });
@@ -753,6 +799,9 @@
         lastFetchHeading = currentHeading;
         lastFetchTime = now;
       }
+
+      // Record GPS breadcrumb
+      recordTrackPoint();
 
       // Update curve distances and check for callouts
       updateCurveDistances();
@@ -969,6 +1018,9 @@
       // Detect "tightens" and "opens" for consecutive curves
       detectCompoundCurves();
 
+      // Detect caution patterns
+      detectCautions();
+
       // Update map markers
       updateCurveMarkers();
       curvesEl.textContent = upcomingCurves.length;
@@ -995,6 +1047,35 @@
             current.opensTo = next.severity;
             current.call = `${dir} ${current.severity} opens ${next.severity}`;
           }
+        }
+      }
+    }
+
+    // Detect caution patterns on curves
+    function detectCautions() {
+      for (let i = 0; i < upcomingCurves.length; i++) {
+        const curve = upcomingCurves[i];
+
+        // "Don't cut" - tight inside curves (hairpins, severity 1-2)
+        // where cutting the corner is dangerous
+        if (curve.isHairpin || (curve.severity <= 2 && curve.angle >= 100)) {
+          curve.caution = "don't cut";
+        }
+
+        // "Sudden" - sharp curve after a long straight (>300m gap from previous curve)
+        if (i > 0 && curve.severity <= 3) {
+          const gap = curve.distanceFromStart - upcomingCurves[i - 1].distanceFromStart;
+          if (gap > 300) {
+            curve.caution = 'sudden';
+          }
+        } else if (i === 0 && curve.severity <= 2 && curve.distanceFromStart > 300) {
+          // First curve in the set and it's far ahead + sharp
+          curve.caution = 'sudden';
+        }
+
+        // "Long" - curves that span a big angle (sustained turning)
+        if (curve.angle >= 130 && !curve.isHairpin) {
+          curve.caution = 'long';
         }
       }
     }
@@ -1036,6 +1117,51 @@
       map.getSource('curves').setData({
         type: 'FeatureCollection',
         features
+      });
+
+      // Calculate and update brake points
+      updateBrakePoints();
+    }
+
+    // Calculate brake point positions on the route before each curve
+    function updateBrakePoints() {
+      if (!routeCoordinates || routeCoordinates.length < 2) return;
+
+      const brakeFeatures = [];
+
+      upcomingCurves.forEach(curve => {
+        // Only show brake points for curves severity 1-4 (tight enough to need braking)
+        if (curve.severity > 4) return;
+
+        // Brake distance: tighter curves need earlier braking
+        // At ~45mph: severity 1 = 80m, severity 2 = 60m, severity 3 = 45m, severity 4 = 30m
+        const brakeDistanceM = (5 - curve.severity) * 20 + 20;
+
+        // Walk backwards along route from curve position to find brake point
+        const curveIdx = curve.routeIndex;
+        let distBack = 0;
+        let brakeIdx = curveIdx;
+
+        for (let j = curveIdx; j > 0; j--) {
+          distBack += getDistance(routeCoordinates[j], routeCoordinates[j - 1]) * 1000;
+          if (distBack >= brakeDistanceM) {
+            brakeIdx = j;
+            break;
+          }
+        }
+
+        if (brakeIdx !== curveIdx && brakeIdx < routeCoordinates.length) {
+          brakeFeatures.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: routeCoordinates[brakeIdx] },
+            properties: {}
+          });
+        }
+      });
+
+      map.getSource('brakepoints').setData({
+        type: 'FeatureCollection',
+        features: brakeFeatures
       });
     }
 
@@ -1145,30 +1271,47 @@
       }
     }
 
-    // Speak curve callout - Rally style: "direction severity [modifier]"
+    // Build rally call text for a curve
+    function buildCallText(curve) {
+      const direction = curve.direction === 'L' ? 'left' : 'right';
+      if (curve.isHairpin) return `${direction} hairpin`;
+      if (curve.isSquare) return `${direction} square`;
+      if (curve.modifier === 'tightens') return `${direction} ${curve.severity} tightens ${curve.tightensTo}`;
+      if (curve.modifier === 'opens') return `${direction} ${curve.severity} opens ${curve.opensTo}`;
+      return `${direction} ${curve.severity}`;
+    }
+
+    // Speak curve callout - Rally style with inter-curve distance
+    // e.g. "left 3, 80, right 2" or "right hairpin, caution don't cut"
     function speakCurve(curve) {
       if (!('speechSynthesis' in window)) return;
 
       window.speechSynthesis.cancel();
 
-      const direction = curve.direction === 'L' ? 'left' : 'right';
-      let text = '';
+      let text = buildCallText(curve);
 
-      // Build the call: Direction first, then severity
-      if (curve.isHairpin) {
-        text = `${direction} hairpin`;
-      } else if (curve.isSquare) {
-        text = `${direction} square`;
-      } else if (curve.modifier === 'tightens') {
-        text = `${direction} ${curve.severity} tightens ${curve.tightensTo}`;
-      } else if (curve.modifier === 'opens') {
-        text = `${direction} ${curve.severity} opens ${curve.opensTo}`;
-      } else {
-        text = `${direction} ${curve.severity}`;
+      // Add caution modifier if present
+      if (curve.caution) {
+        text += `, caution ${curve.caution}`;
       }
 
+      // Add distance to next curve if it's within 200m (rally style linkage)
+      const curveIdx = upcomingCurves.indexOf(curve);
+      if (curveIdx >= 0 && curveIdx < upcomingCurves.length - 1) {
+        const nextCurve = upcomingCurves[curveIdx + 1];
+        const gapDistance = nextCurve.distance - curve.distance;
+        if (gapDistance > 20 && gapDistance <= 200) {
+          // Round to nearest 10m for clean callout
+          const roundedGap = Math.round(gapDistance / 10) * 10;
+          text += `, ${roundedGap}, ${buildCallText(nextCurve)}`;
+        }
+      }
+
+      // Record the pace note if recording
+      recordPaceNote(curve, text);
+
       const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.3;  // Slightly slower for clarity
+      utterance.rate = 1.3;
       utterance.pitch = 1.0;
       utterance.volume = 1.0;
 
@@ -1353,6 +1496,107 @@
       checkForCallouts();
     }
 
+    // Toggle route recording
+    function toggleRecording() {
+      if (isRecording) {
+        stopRecording();
+      } else {
+        startRecording();
+      }
+    }
+
+    function startRecording() {
+      isRecording = true;
+      recordedTrack = [];
+      recordedNotes = [];
+      recordingStartTime = Date.now();
+      const btn = document.getElementById('record-btn');
+      btn.classList.add('recording');
+      showStatus('Recording started');
+      setTimeout(hideStatus, 1500);
+    }
+
+    function stopRecording() {
+      isRecording = false;
+      const btn = document.getElementById('record-btn');
+      btn.classList.remove('recording');
+
+      if (recordedTrack.length < 2) {
+        showStatus('Not enough data to save');
+        setTimeout(hideStatus, 1500);
+        return;
+      }
+
+      // Build exportable pace notes document
+      const routeData = {
+        name: `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
+        date: new Date().toISOString(),
+        duration: Date.now() - recordingStartTime,
+        trackPoints: recordedTrack.length,
+        track: recordedTrack,
+        paceNotes: recordedNotes
+      };
+
+      // Download as JSON
+      const blob = new Blob([JSON.stringify(routeData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `pace-notes-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      showStatus(`Saved ${recordedNotes.length} pace notes`);
+      setTimeout(hideStatus, 2000);
+    }
+
+    // Record a GPS point (called from handlePosition)
+    function recordTrackPoint() {
+      if (!isRecording || !currentPosition) return;
+      recordedTrack.push({
+        position: [...currentPosition],
+        speed: currentSpeed,
+        heading: currentHeading,
+        time: Date.now() - recordingStartTime
+      });
+    }
+
+    // Record a pace note (called when a curve is spoken)
+    function recordPaceNote(curve, spokenText) {
+      if (!isRecording) return;
+      recordedNotes.push({
+        position: [...curve.position],
+        call: curve.call,
+        spoken: spokenText,
+        severity: curve.severity,
+        direction: curve.direction,
+        angle: curve.angle,
+        caution: curve.caution || null,
+        time: Date.now() - recordingStartTime
+      });
+    }
+
+    // Manual refresh route - forces re-fetch regardless of thresholds
+    async function refreshRoute() {
+      if (!currentPosition) {
+        showStatus('No GPS position yet');
+        setTimeout(hideStatus, 1500);
+        return;
+      }
+      const btn = document.getElementById('refresh-btn');
+      btn.style.opacity = '0.5';
+      showStatus('Refreshing route...');
+      await fetchRoadAhead();
+      lastFetchPosition = [...currentPosition];
+      lastFetchHeading = currentHeading;
+      lastFetchTime = Date.now();
+      updateCurveDistances();
+      btn.style.opacity = '1';
+      hideStatus();
+    }
+
     // Center map on user
     function centerOnUser() {
       if (currentPosition) {
@@ -1437,6 +1681,22 @@
 
     function toRad(deg) { return deg * Math.PI / 180; }
     function toDeg(rad) { return rad * 180 / Math.PI; }
+
+    // Unlock speechSynthesis on iOS (requires user gesture)
+    function unlockSpeech() {
+      if (speechUnlocked || !('speechSynthesis' in window)) return;
+      const utterance = new SpeechSynthesisUtterance('');
+      utterance.volume = 0;
+      window.speechSynthesis.speak(utterance);
+      speechUnlocked = true;
+    }
+
+    // Attach unlock to all interactive buttons (covers first tap regardless of which button)
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('button').forEach(btn => {
+        btn.addEventListener('click', unlockSpeech, { once: false });
+      });
+    });
 
     // Initialize on load
     window.addEventListener('DOMContentLoaded', checkSavedKey);
