@@ -1030,7 +1030,7 @@
         type: 'Feature',
         geometry: { type: 'Point', coordinates: curve.position },
         properties: {
-          label: `${curve.severity}${curve.direction}`,
+          label: `${curve.direction}${curve.severity}`,
           color: getSeverityColor(curve.severity)
         }
       }));
