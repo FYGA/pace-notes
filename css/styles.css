@@ -415,11 +415,12 @@ body {
 
 #button-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 #start-btn, #demo-btn {
-  flex: 1;
+  flex: 1 0 calc(50% - 5px);
   padding: 18px;
   border-radius: 14px;
   border: none;
@@ -472,6 +473,7 @@ body {
 }
 
 #sound-btn, #center-btn, #settings-btn, #route-btn, #record-btn {
+  flex: 1 1 auto;
   min-width: 48px;
   height: 48px;
   border-radius: 12px;
