@@ -38,6 +38,142 @@ body {
   display: none;
 }
 
+/* Route setup overlay */
+#route-setup-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 10, 15, 0.96);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.route-setup-content {
+  max-width: 420px;
+  width: 100%;
+  text-align: center;
+}
+
+.route-setup-content h2 {
+  font-size: 24px;
+  margin-bottom: 6px;
+}
+
+.route-setup-content > p {
+  color: #888;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.dest-input-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.dest-input-row input {
+  flex: 1;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid #333;
+  background: #1a1a24;
+  color: white;
+  font-size: 15px;
+}
+
+.dest-input-row input::placeholder {
+  color: #666;
+}
+
+.dest-input-row button {
+  padding: 16px 24px;
+  border-radius: 12px;
+  border: none;
+  background: #3b82f6;
+  color: white;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dest-input-row button:disabled {
+  background: #333;
+  color: #666;
+}
+
+/* Route info card */
+#route-info {
+  background: rgba(30, 30, 40, 0.9);
+  border-radius: 16px;
+  padding: 20px;
+  margin-top: 8px;
+  text-align: left;
+}
+
+.route-info-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.route-info-icon {
+  font-size: 20px;
+}
+
+.route-dest-name {
+  font-size: 15px;
+  font-weight: 500;
+  color: #ccc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-info-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.route-stat {
+  text-align: center;
+}
+
+.route-stat-val {
+  display: block;
+  font-size: 20px;
+  font-weight: 700;
+  font-family: 'SF Mono', monospace;
+  color: #fff;
+}
+
+.route-stat-label {
+  display: block;
+  font-size: 11px;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-top: 2px;
+}
+
+#start-driving-btn {
+  width: 100%;
+  padding: 16px;
+  border-radius: 12px;
+  border: none;
+  background: #22c55e;
+  color: white;
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .setup-content {
   max-width: 400px;
   text-align: center;
@@ -262,7 +398,7 @@ body {
   color: white;
 }
 
-#sound-btn, #center-btn, #settings-btn, #refresh-btn, #record-btn {
+#sound-btn, #center-btn, #settings-btn, #route-btn, #record-btn {
   width: 56px;
   height: 56px;
   border-radius: 14px;

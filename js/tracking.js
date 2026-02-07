@@ -1,5 +1,5 @@
 // ============================
-// Tracking - GPS handling, position history, heading, re-fetch
+// Tracking - GPS position tracking along pre-calculated route
 // ============================
 
 // Toggle tracking on/off
@@ -18,13 +18,21 @@ function startTracking() {
     return;
   }
 
-  // Reset state for fresh tracking session
+  if (!isRouteLoaded) {
+    showStatus('Load a route first');
+    setTimeout(hideStatus, 2000);
+    return;
+  }
+
+  // Reset tracking state (but keep the pre-calculated curves)
   positionHistory = [];
-  lastFetchPosition = null;
-  lastFetchHeading = null;
-  lastFetchTime = 0;
-  upcomingCurves = [];
   lastSpokenCurve = null;
+
+  // Restore all route curves for fresh tracking
+  upcomingCurves = allRouteCurves.map(c => ({ ...c }));
+
+  // Hide route setup, show driving UI
+  document.getElementById('route-setup-overlay').style.display = 'none';
 
   requestWakeLock();
   startSession();
@@ -62,8 +70,8 @@ function stopTracking() {
   hideStatus();
 }
 
-// Handle GPS position update
-async function handlePosition(position) {
+// Handle GPS position update — no API calls, just track along the route
+function handlePosition(position) {
   hideStatus();
 
   const { latitude, longitude, accuracy, heading, speed } = position.coords;
@@ -103,15 +111,6 @@ async function handlePosition(position) {
     duration: 500
   });
 
-  // Determine if we should re-fetch road data
-  const shouldRefetch = needsRefetch(now);
-  if (shouldRefetch) {
-    await fetchRoadAhead();
-    lastFetchPosition = [...currentPosition];
-    lastFetchHeading = currentHeading;
-    lastFetchTime = now;
-  }
-
   // Record GPS breadcrumb
   recordTrackPoint();
 
@@ -136,101 +135,10 @@ function computeMovementHeading() {
   return getBearing(older.position, recent.position);
 }
 
-// Determine if road data needs to be re-fetched
-function needsRefetch(now) {
-  if (!lastFetchPosition) return true;
-  const distMoved = getDistance(lastFetchPosition, currentPosition) * 1000;
-  if (distMoved > REFETCH_DISTANCE_M) return true;
-  if (lastFetchHeading !== null) {
-    let headingDelta = Math.abs(currentHeading - lastFetchHeading);
-    if (headingDelta > 180) headingDelta = 360 - headingDelta;
-    if (headingDelta > REFETCH_HEADING_DEG) return true;
-  }
-  if (now - lastFetchTime > REFETCH_INTERVAL_MS) return true;
-  return false;
-}
-
-// Fetch road geometry ahead using Mapbox Directions
-async function fetchRoadAhead() {
-  if (!currentPosition) return;
-
-  const heading = currentHeading || 0;
-  const aheadPoint = getPointAhead(currentPosition, heading, LOOK_AHEAD_KM);
-
-  // Use a "behind" point to anchor the route to the correct road/direction
-  let behindPoint = null;
-  if (positionHistory.length >= 3) {
-    for (let i = positionHistory.length - 3; i >= 0; i--) {
-      const dist = getDistance(positionHistory[i].position, currentPosition) * 1000;
-      if (dist > 30) {
-        behindPoint = positionHistory[i].position;
-        break;
-      }
-    }
-  }
-  if (!behindPoint) {
-    const reverseHeading = (heading + 180) % 360;
-    behindPoint = getPointAhead(currentPosition, reverseHeading, 0.05);
-  }
-
-  try {
-    // 3 waypoints: behind -> current -> ahead (anchors to correct road)
-    const coords = `${behindPoint[0]},${behindPoint[1]};${currentPosition[0]},${currentPosition[1]};${aheadPoint[0]},${aheadPoint[1]}`;
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coords}?geometries=geojson&overview=full&access_token=${mapboxToken}`;
-
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.routes && data.routes[0]) {
-      const fullRoute = data.routes[0].geometry.coordinates;
-
-      // Find closest point on route to current position, keep only road ahead
-      let closestIdx = 0;
-      let closestDist = Infinity;
-      for (let i = 0; i < fullRoute.length; i++) {
-        const d = getDistance(currentPosition, fullRoute[i]);
-        if (d < closestDist) {
-          closestDist = d;
-          closestIdx = i;
-        }
-      }
-
-      routeCoordinates = fullRoute.slice(Math.max(0, closestIdx - 1));
-
-      // Analyze curves first (so color-coded route has curve data)
-      analyzeCurves(routeCoordinates);
-
-      // Update route on map with color-coded segments
-      updateColoredRoute();
-    }
-  } catch (error) {
-    console.error('Error fetching road data:', error);
-  }
-}
-
 // Update GPS accuracy indicator
 function updateAccuracyIndicator(accuracy) {
   accuracyText.textContent = `\u00B1${Math.round(accuracy)}m`;
   gpsDot.className = 'gps-dot ' + (accuracy < 10 ? 'good' : accuracy < 30 ? 'medium' : 'poor');
-}
-
-// Manual refresh route
-async function refreshRoute() {
-  if (!currentPosition) {
-    showStatus('No GPS position yet');
-    setTimeout(hideStatus, 1500);
-    return;
-  }
-  const btn = document.getElementById('refresh-btn');
-  btn.style.opacity = '0.5';
-  showStatus('Refreshing route...');
-  await fetchRoadAhead();
-  lastFetchPosition = [...currentPosition];
-  lastFetchHeading = currentHeading;
-  lastFetchTime = Date.now();
-  updateCurveDistances();
-  btn.style.opacity = '1';
-  hideStatus();
 }
 
 // Center map on user

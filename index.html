@@ -9,7 +9,7 @@
   <link href="css/styles.css" rel="stylesheet" />
 </head>
 <body>
-  <!-- Setup Overlay -->
+  <!-- Setup Overlay (API Key) -->
   <div id="setup-overlay">
     <div class="setup-content">
       <h1>&#127937; Pace Notes</h1>
@@ -27,6 +27,30 @@
         <button id="setup-btn" onclick="initializeApp()">Start App</button>
       </div>
       <a href="https://account.mapbox.com/access-tokens/" target="_blank">Get a free Mapbox API key &#8594;</a>
+    </div>
+  </div>
+
+  <!-- Route Setup Overlay (Destination) -->
+  <div id="route-setup-overlay" style="display: none;">
+    <div class="route-setup-content">
+      <h2>&#128205; Where to?</h2>
+      <p>Enter a destination to calculate your route and pace notes</p>
+      <div class="dest-input-row">
+        <input type="text" id="destination-input" placeholder="Address, city, or place name" autocomplete="off">
+        <button id="load-route-btn" onclick="loadRoute()">Go</button>
+      </div>
+      <div id="route-info" style="display: none;">
+        <div class="route-info-header">
+          <div class="route-info-icon">&#9989;</div>
+          <div id="route-dest-name" class="route-dest-name">Destination</div>
+        </div>
+        <div class="route-info-stats">
+          <div class="route-stat"><span class="route-stat-val" id="route-dist-info">--</span><span class="route-stat-label">distance</span></div>
+          <div class="route-stat"><span class="route-stat-val" id="route-time-info">--</span><span class="route-stat-label">time</span></div>
+          <div class="route-stat"><span class="route-stat-val" id="route-curves-info">--</span><span class="route-stat-label">curves</span></div>
+        </div>
+        <button id="start-driving-btn" onclick="startFromRoute()">&#127937; Start Driving</button>
+      </div>
     </div>
   </div>
 
@@ -99,7 +123,7 @@
         <span>&#127916;</span> Demo
       </button>
       <button id="sound-btn" onclick="toggleSound()">&#128266;</button>
-      <button id="refresh-btn" onclick="refreshRoute()">&#8635;</button>
+      <button id="route-btn" onclick="showRouteSetup()">&#128205;</button>
       <button id="record-btn" onclick="toggleRecording()">&#9210;</button>
       <button id="center-btn" onclick="centerOnUser()">&#9678;</button>
       <button id="settings-btn" onclick="openSettings()">&#9881;</button>
@@ -111,6 +135,7 @@
   <script src="js/utils.js"></script>
   <script src="js/map.js"></script>
   <script src="js/curves.js"></script>
+  <script src="js/routing.js"></script>
   <script src="js/recording.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/ui.js"></script>

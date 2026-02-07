@@ -66,9 +66,13 @@ async function startDemo() {
   currentPosition = demoRouteData[0];
   routeCoordinates = demoRouteData;
 
+  // Hide route setup if visible
+  document.getElementById('route-setup-overlay').style.display = 'none';
+
   // Analyze curves in demo route, then color-code the route
   analyzeCurves(demoRouteData);
   updateColoredRoute();
+  isRouteLoaded = true;
 
   // Center map ahead of start (so user appears in lower third)
   const startBearing = getBearing(demoRouteData[0], demoRouteData[1]);
@@ -89,6 +93,7 @@ async function startDemo() {
 // Stop demo mode
 function stopDemo() {
   isDemoMode = false;
+  isRouteLoaded = false;
   if (demoInterval) {
     clearInterval(demoInterval);
     demoInterval = null;

@@ -15,6 +15,7 @@ function initializeApp() {
   localStorage.setItem('mapboxToken', mapboxToken);
   document.getElementById('setup-overlay').classList.add('hidden');
   initMap();
+  showRouteSetup();
 }
 
 // Check for saved API key
@@ -34,7 +35,33 @@ function useSavedKey() {
     mapboxToken = saved;
     document.getElementById('setup-overlay').classList.add('hidden');
     initMap();
+    showRouteSetup();
   }
+}
+
+// Show route setup overlay
+function showRouteSetup() {
+  if (isTracking) stopTracking();
+  if (isDemoMode) stopDemo();
+
+  const overlay = document.getElementById('route-setup-overlay');
+  overlay.style.display = 'flex';
+
+  // Reset route info if no route loaded
+  if (!isRouteLoaded) {
+    document.getElementById('route-info').style.display = 'none';
+  }
+
+  // Focus destination input
+  setTimeout(() => {
+    document.getElementById('destination-input').focus();
+  }, 100);
+}
+
+// Start driving from loaded route
+function startFromRoute() {
+  document.getElementById('route-setup-overlay').style.display = 'none';
+  toggleTracking();
 }
 
 // Show the key input form to change key
@@ -45,7 +72,7 @@ function showKeyInput() {
   document.getElementById('api-key-input').focus();
 }
 
-// Open settings overlay
+// Open settings overlay (API key)
 function openSettings() {
   if (isTracking) {
     stopTracking();
@@ -61,6 +88,7 @@ function openSettings() {
     document.getElementById('key-input-section').style.display = 'block';
   }
 
+  document.getElementById('route-setup-overlay').style.display = 'none';
   document.getElementById('setup-overlay').classList.remove('hidden');
 }
 

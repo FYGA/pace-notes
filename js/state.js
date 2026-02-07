@@ -11,10 +11,8 @@ let watchId = null;
 let currentPosition = null;
 let currentSpeed = 0;
 let currentHeading = 0;
-let lastFetchPosition = null;
-let lastFetchHeading = null;
-let lastFetchTime = 0;
 let upcomingCurves = [];
+let allRouteCurves = []; // Full set of curves for the loaded route
 let lastSpokenCurve = null;
 let routeCoordinates = [];
 let userMarker = null;
@@ -34,12 +32,13 @@ let recordedTrack = []; // GPS breadcrumbs
 let recordedNotes = []; // Pace notes encountered during recording
 let recordingStartTime = null;
 
+// Routing state
+let routeEndPoint = null; // [lng, lat] destination
+let isRouteLoaded = false; // Route fetched and curves analyzed
+let routeMetadata = { distance: 0, duration: 0 }; // From Directions API
+
 // Constants
 const POSITION_HISTORY_MAX = 10;
-const REFETCH_DISTANCE_M = 50;
-const REFETCH_HEADING_DEG = 25;
-const REFETCH_INTERVAL_MS = 10000;
-const LOOK_AHEAD_KM = 2;
 
 // Demo mode state
 let isDemoMode = false;
