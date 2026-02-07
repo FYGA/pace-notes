@@ -49,6 +49,12 @@ body {
   align-items: center;
   justify-content: center;
   padding: 24px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .route-setup-content {
@@ -63,7 +69,7 @@ body {
 }
 
 .route-setup-content > p {
-  color: #888;
+  color: #999;
   font-size: 14px;
   margin-bottom: 20px;
 }
@@ -82,10 +88,16 @@ body {
   background: #1a1a24;
   color: white;
   font-size: 15px;
+  transition: border-color 0.2s;
+}
+
+.dest-input-row input:focus {
+  outline: none;
+  border-color: #3b82f6;
 }
 
 .dest-input-row input::placeholder {
-  color: #666;
+  color: #777;
 }
 
 .dest-input-row button {
@@ -98,11 +110,22 @@ body {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.dest-input-row button:hover {
+  background: #2563eb;
+}
+
+.dest-input-row button:active {
+  transform: scale(0.96);
 }
 
 .dest-input-row button:disabled {
   background: #333;
   color: #666;
+  transform: none;
+  cursor: not-allowed;
 }
 
 /* Route info card */
@@ -112,6 +135,12 @@ body {
   padding: 20px;
   margin-top: 8px;
   text-align: left;
+  animation: slideUp 0.25s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .route-info-header {
@@ -172,6 +201,15 @@ body {
   font-size: 17px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+#start-driving-btn:hover {
+  background: #16a34a;
+}
+
+#start-driving-btn:active {
+  transform: scale(0.97);
 }
 
 .setup-content {
@@ -198,6 +236,12 @@ body {
   color: white;
   font-size: 14px;
   margin-bottom: 12px;
+  transition: border-color 0.2s;
+}
+
+.setup-content input:focus {
+  outline: none;
+  border-color: #22c55e;
 }
 
 .setup-content input::placeholder {
@@ -214,6 +258,15 @@ body {
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.setup-content button:hover {
+  background: #16a34a;
+}
+
+.setup-content button:active {
+  transform: scale(0.97);
 }
 
 .setup-content button:disabled {
@@ -362,7 +415,7 @@ body {
 
 #button-row {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 
 #start-btn, #demo-btn {
@@ -377,7 +430,11 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  transition: all 0.2s;
+  transition: background 0.15s, transform 0.1s;
+}
+
+#start-btn:active, #demo-btn:active {
+  transform: scale(0.96);
 }
 
 #start-btn.start, #demo-btn {
@@ -385,12 +442,24 @@ body {
   color: white;
 }
 
+#start-btn.start:hover {
+  background: #16a34a;
+}
+
 #demo-btn {
   background: #8b5cf6;
 }
 
+#demo-btn:hover {
+  background: #7c3aed;
+}
+
 #demo-btn.active {
   background: #ef4444;
+}
+
+#demo-btn.active:hover {
+  background: #dc2626;
 }
 
 #start-btn.stop {
@@ -398,20 +467,35 @@ body {
   color: white;
 }
 
+#start-btn.stop:hover {
+  background: #dc2626;
+}
+
 #sound-btn, #center-btn, #settings-btn, #route-btn, #record-btn {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
+  min-width: 48px;
+  height: 48px;
+  border-radius: 12px;
   border: none;
   background: rgba(50, 50, 60, 0.9);
   color: white;
-  font-size: 24px;
+  font-size: 22px;
   cursor: pointer;
   backdrop-filter: blur(10px);
+  transition: background 0.15s, transform 0.1s;
+}
+
+#sound-btn:active, #center-btn:active, #settings-btn:active,
+#route-btn:active, #record-btn:active {
+  transform: scale(0.92);
+}
+
+#sound-btn:hover, #center-btn:hover, #settings-btn:hover,
+#route-btn:hover, #record-btn:hover {
+  background: rgba(70, 70, 80, 0.95);
 }
 
 #sound-btn.muted {
-  color: #666;
+  color: #555;
 }
 
 #record-btn.recording {
@@ -420,7 +504,13 @@ body {
 }
 
 #settings-btn {
-  font-size: 20px;
+  font-size: 18px;
+}
+
+/* Focus rings for keyboard accessibility */
+button:focus-visible, input:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
 }
 
 /* Status messages */
@@ -428,18 +518,24 @@ body {
   position: fixed;
   top: 50%;
   left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(30, 30, 40, 0.95);
+  transform: translate(-50%, -50%) scale(0.95);
+  background: rgba(20, 20, 30, 0.95);
   padding: 20px 30px;
   border-radius: 16px;
   text-align: center;
   z-index: 200;
   backdrop-filter: blur(20px);
   display: none;
+  font-weight: 500;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.3);
+  opacity: 0;
+  transition: opacity 0.2s, transform 0.2s;
 }
 
 #status.visible {
   display: block;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
 }
 
 /* Legend */
@@ -530,12 +626,12 @@ body {
   background: rgba(20, 20, 30, 0.85);
   padding: 8px 14px;
   border-radius: 12px;
-  font-size: 11px;
+  font-size: 13px;
   z-index: 110;
   backdrop-filter: blur(10px);
   display: none;
   font-family: 'SF Mono', monospace;
-  line-height: 1.6;
+  line-height: 1.7;
 }
 
 #session-stats.visible {
@@ -549,7 +645,7 @@ body {
 }
 
 .stat-row .label {
-  color: #888;
+  color: #999;
 }
 
 .stat-row .val {
@@ -560,12 +656,13 @@ body {
 /* Wake lock indicator */
 #wake-lock-indicator {
   display: inline-block;
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #666;
+  background: #555;
   margin-left: 8px;
   vertical-align: middle;
+  transition: background 0.3s;
 }
 
 #wake-lock-indicator.active {

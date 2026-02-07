@@ -56,6 +56,11 @@ function getCurrentLocation() {
       },
       (error) => {
         console.error('Geolocation error:', error);
+        if (error.code === 1) {
+          showStatus('Location access denied — check permissions');
+        } else if (error.code === 3) {
+          showStatus('GPS timed out — try again');
+        }
         resolve(null);
       },
       { enableHighAccuracy: true, timeout: 10000 }
@@ -76,17 +81,17 @@ async function loadRoute() {
 
   const loadBtn = document.getElementById('load-route-btn');
   loadBtn.disabled = true;
-  loadBtn.textContent = 'Loading...';
+  loadBtn.textContent = '...';
   showStatus('Finding destination...');
 
   try {
     // Geocode destination
     const destResult = await geocodeAddress(destQuery);
     if (!destResult) {
-      showStatus('Destination not found');
-      setTimeout(hideStatus, 2000);
+      showStatus('Destination not found — try a different search');
+      setTimeout(hideStatus, 2500);
       loadBtn.disabled = false;
-      loadBtn.textContent = 'Load Route';
+      loadBtn.textContent = 'Go';
       return;
     }
 
@@ -97,9 +102,9 @@ async function loadRoute() {
     const startPoint = await getCurrentLocation();
     if (!startPoint) {
       showStatus('Could not get your location');
-      setTimeout(hideStatus, 2000);
+      setTimeout(hideStatus, 2500);
       loadBtn.disabled = false;
-      loadBtn.textContent = 'Load Route';
+      loadBtn.textContent = 'Go';
       return;
     }
 
@@ -111,7 +116,16 @@ async function loadRoute() {
       showStatus('Could not find a route');
       setTimeout(hideStatus, 2000);
       loadBtn.disabled = false;
-      loadBtn.textContent = 'Load Route';
+      loadBtn.textContent = 'Go';
+      return;
+    }
+
+    // Guard against very short routes
+    if (routeData.geometry.coordinates.length < 10) {
+      showStatus('Route is too short');
+      setTimeout(hideStatus, 2000);
+      loadBtn.disabled = false;
+      loadBtn.textContent = 'Go';
       return;
     }
 
@@ -132,8 +146,8 @@ async function loadRoute() {
     const durationMins = Math.round(routeMetadata.duration / 60);
     const routeInfo = document.getElementById('route-info');
     document.getElementById('route-dist-info').textContent = `${distMiles} mi`;
-    document.getElementById('route-time-info').textContent = `~${durationMins} min`;
-    document.getElementById('route-curves-info').textContent = `${upcomingCurves.length} curves`;
+    document.getElementById('route-time-info').textContent = `${durationMins} min`;
+    document.getElementById('route-curves-info').textContent = upcomingCurves.length;
     document.getElementById('route-dest-name').textContent = destResult.name;
     routeInfo.style.display = 'block';
 
@@ -151,14 +165,14 @@ async function loadRoute() {
     map.fitBounds(bounds, { padding: 60, pitch: 0, bearing: 0 });
 
     showStatus('Route ready!');
-    setTimeout(hideStatus, 2000);
+    setTimeout(hideStatus, 1500);
 
   } catch (error) {
     console.error('Route load error:', error);
-    showStatus('Error loading route');
-    setTimeout(hideStatus, 2000);
+    showStatus('Error loading route — check connection');
+    setTimeout(hideStatus, 2500);
   } finally {
     loadBtn.disabled = false;
-    loadBtn.textContent = 'Load Route';
+    loadBtn.textContent = 'Go';
   }
 }

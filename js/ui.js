@@ -42,7 +42,7 @@ function updateApproachGlow() {
   const next = upcomingCurves[0];
   const maxGlowDist = 150;
 
-  if (next.distance < maxGlowDist && next.distance > 0 && next.severity <= 4) {
+  if (next.distance < maxGlowDist && next.distance > 0 && next.severity <= 5) {
     const intensity = Math.max(0, 1 - (next.distance / maxGlowDist));
     const color = getSeverityColor(next.severity);
     glow.style.setProperty('--glow-color', color);

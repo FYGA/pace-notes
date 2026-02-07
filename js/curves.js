@@ -273,7 +273,7 @@ function updateCurveDistances() {
 
 // Check if we should call out a curve
 function checkForCallouts() {
-  if (!soundEnabled || upcomingCurves.length === 0) return;
+  if (upcomingCurves.length === 0) return;
 
   const next = upcomingCurves[0];
 
@@ -287,9 +287,26 @@ function checkForCallouts() {
 
   if (next.distance <= calloutDistance && next.distance > 10) {
     if (lastSpokenCurve !== next) {
-      speakCurve(next);
+      // Count turn regardless of sound setting
+      sessionTurnsPassed++;
+      if (soundEnabled) {
+        speakCurve(next);
+      }
       lastSpokenCurve = next;
     }
+  }
+}
+
+// Check if route is complete (all curves passed, near endpoint)
+function checkRouteCompletion() {
+  if (!isRouteLoaded || !currentPosition || routeCoordinates.length < 2) return;
+
+  const lastCoord = routeCoordinates[routeCoordinates.length - 1];
+  const distToEnd = getDistance(currentPosition, lastCoord) * 1000; // meters
+
+  if (distToEnd < 50 && upcomingCurves.length === 0) {
+    showStatus('Route complete!');
+    setTimeout(hideStatus, 4000);
   }
 }
 

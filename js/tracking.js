@@ -27,6 +27,7 @@ function startTracking() {
   // Reset tracking state (but keep the pre-calculated curves)
   positionHistory = [];
   lastSpokenCurve = null;
+  offRouteWarningShown = false;
 
   // Restore all route curves for fresh tracking
   upcomingCurves = allRouteCurves.map(c => ({ ...c }));
@@ -121,8 +122,35 @@ function handlePosition(position) {
   updateCurveDistances();
   checkForCallouts();
 
+  // Check if off-route
+  checkOffRoute();
+
+  // Check route completion
+  checkRouteCompletion();
+
   // Visual approach indicator
   updateApproachGlow();
+}
+
+// Warn if user has drifted off the route
+let offRouteWarningShown = false;
+function checkOffRoute() {
+  if (routeCoordinates.length < 2 || !currentPosition) return;
+
+  // Find closest route point
+  let closestDist = Infinity;
+  for (let i = 0; i < routeCoordinates.length; i++) {
+    const d = getDistance(currentPosition, routeCoordinates[i]) * 1000; // meters
+    if (d < closestDist) closestDist = d;
+  }
+
+  if (closestDist > 100 && !offRouteWarningShown) {
+    showStatus('Off route — recalculate?');
+    offRouteWarningShown = true;
+    setTimeout(hideStatus, 3000);
+  } else if (closestDist < 50) {
+    offRouteWarningShown = false;
+  }
 }
 
 // Compute heading from recent position history (more reliable than GPS heading)

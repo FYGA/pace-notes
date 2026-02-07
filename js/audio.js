@@ -45,6 +45,8 @@ function triggerHaptic(severity) {
     navigator.vibrate([100, 50, 100]); // double pulse for tight
   } else if (severity <= 3) {
     navigator.vibrate(80); // single pulse for medium
+  } else if (severity <= 5) {
+    navigator.vibrate(40); // light tap for open curves
   }
 }
 
@@ -59,9 +61,6 @@ function speakCurve(curve) {
   // Flash the callout text
   callTextEl.classList.add('flash');
   setTimeout(() => callTextEl.classList.remove('flash'), 200);
-
-  // Track turns passed in session
-  sessionTurnsPassed++;
 
   window.speechSynthesis.cancel();
 

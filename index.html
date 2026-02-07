@@ -122,11 +122,11 @@
       <button id="demo-btn" onclick="toggleDemo()">
         <span>&#127916;</span> Demo
       </button>
-      <button id="sound-btn" onclick="toggleSound()">&#128266;</button>
-      <button id="route-btn" onclick="showRouteSetup()">&#128205;</button>
-      <button id="record-btn" onclick="toggleRecording()">&#9210;</button>
-      <button id="center-btn" onclick="centerOnUser()">&#9678;</button>
-      <button id="settings-btn" onclick="openSettings()">&#9881;</button>
+      <button id="sound-btn" onclick="toggleSound()" aria-label="Toggle sound">&#128266;</button>
+      <button id="route-btn" onclick="showRouteSetup()" aria-label="Set destination">&#128205;</button>
+      <button id="record-btn" onclick="toggleRecording()" aria-label="Record route">&#9210;</button>
+      <button id="center-btn" onclick="centerOnUser()" aria-label="Center map">&#9678;</button>
+      <button id="settings-btn" onclick="openSettings()" aria-label="Settings">&#9881;</button>
     </div>
   </div>
 
@@ -151,6 +151,22 @@
 
       // Check for saved API key
       checkSavedKey();
+
+      // Enter key submits destination input
+      document.getElementById('destination-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          loadRoute();
+        }
+      });
+
+      // Enter key submits API key input
+      document.getElementById('api-key-input').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          initializeApp();
+        }
+      });
 
       // Attach iOS speech unlock to all buttons
       document.querySelectorAll('button').forEach(btn => {
