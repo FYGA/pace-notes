@@ -13,10 +13,18 @@ export const createEmptyRoute = () => ({
   progressMeters: 0,
 });
 
+export const createEmptyRoutePlan = () => ({
+  status: "idle",
+  candidates: [],
+  selectedId: null,
+  notice: null,
+  error: null,
+});
+
 export const createInitialState = ({
   hasSavedToken = false,
   maskedToken = "",
-  preferences = { paceNoteProfile: "numerical" },
+  preferences = { paceNoteProfile: "numerical", preferWindingRoutes: true },
 } = {}) => ({
   initialized: false,
   mapReady: false,
@@ -39,6 +47,7 @@ export const createInitialState = ({
     routeDistanceMeters: null,
   },
   route: createEmptyRoute(),
+  routePlan: createEmptyRoutePlan(),
   session: {
     active: false,
     distanceMiles: 0,
@@ -53,6 +62,7 @@ export const createInitialState = ({
     settingsOpen: true,
     showTokenInput: !hasSavedToken,
     routeOpen: false,
+    routeMode: "destination",
     followUser: true,
   },
 });

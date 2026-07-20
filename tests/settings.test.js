@@ -35,10 +35,17 @@ function withStorage(run) {
 
 test("pace-note preferences round trip", () => {
   withStorage(() => {
-    assert.deepEqual(savePreferences({ paceNoteProfile: "descriptive" }), {
+    assert.deepEqual(savePreferences({
       paceNoteProfile: "descriptive",
+      preferWindingRoutes: false,
+    }), {
+      paceNoteProfile: "descriptive",
+      preferWindingRoutes: false,
     });
-    assert.deepEqual(loadPreferences(), { paceNoteProfile: "descriptive" });
+    assert.deepEqual(loadPreferences(), {
+      paceNoteProfile: "descriptive",
+      preferWindingRoutes: false,
+    });
   });
 });
 
@@ -50,11 +57,13 @@ test("unknown and corrupted preferences fall back safely", () => {
     );
     assert.deepEqual(loadPreferences(), {
       paceNoteProfile: DEFAULT_PACE_NOTE_PROFILE,
+      preferWindingRoutes: true,
     });
 
     values.set("paceNotes.preferences.v1", "not-json");
     assert.deepEqual(loadPreferences(), {
       paceNoteProfile: DEFAULT_PACE_NOTE_PROFILE,
+      preferWindingRoutes: true,
     });
   });
 });
@@ -79,9 +88,11 @@ test("blocked browser storage does not prevent startup or in-memory choices", ()
   try {
     assert.deepEqual(loadPreferences(), {
       paceNoteProfile: DEFAULT_PACE_NOTE_PROFILE,
+      preferWindingRoutes: true,
     });
     assert.deepEqual(savePreferences({ paceNoteProfile: "descriptive" }), {
       paceNoteProfile: "descriptive",
+      preferWindingRoutes: true,
     });
   } finally {
     if (descriptor) Object.defineProperty(globalThis, "localStorage", descriptor);

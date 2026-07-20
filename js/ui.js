@@ -34,6 +34,56 @@ export class AppView {
       event.preventDefault();
       actions.onLoadRoute(elements.destinationInput.value.trim());
     });
+    elements.loopForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      actions.onLoadLoop(Number(elements.loopDistance.value));
+    });
+    elements.destinationModeButton.addEventListener("click", () => {
+      actions.onChangeRouteMode("destination");
+    });
+    elements.loopModeButton.addEventListener("click", () => {
+      actions.onChangeRouteMode("loop");
+    });
+    elements.preferWinding.addEventListener("change", () => {
+      actions.onChangePreferWinding(elements.preferWinding.checked);
+    });
+    elements.routeCandidates.addEventListener("click", (event) => {
+      const candidate = event.target.closest("[data-candidate-id]");
+      if (!candidate) return;
+      const restoreFocus = candidate === document.activeElement;
+      selectRouteCandidateAndRestoreFocus(
+        elements.routeCandidates,
+        candidate.dataset.candidateId,
+        actions,
+        restoreFocus,
+      );
+    });
+    elements.routeCandidates.addEventListener("keydown", (event) => {
+      if (!["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) {
+        return;
+      }
+      const candidates = [
+        ...elements.routeCandidates.querySelectorAll("[data-candidate-id]"),
+      ];
+      if (!candidates.length) return;
+      event.preventDefault();
+      const currentIndex = Math.max(0, candidates.indexOf(document.activeElement));
+      const nextIndex =
+        event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? candidates.length - 1
+            : event.key === "ArrowDown" || event.key === "ArrowRight"
+              ? (currentIndex + 1) % candidates.length
+              : (currentIndex - 1 + candidates.length) % candidates.length;
+      const candidate = candidates[nextIndex];
+      selectRouteCandidateAndRestoreFocus(
+        elements.routeCandidates,
+        candidate.dataset.candidateId,
+        actions,
+        true,
+      );
+    });
     elements.closeRouteButton.addEventListener("click", actions.onCloseRoute);
     elements.routePanel.addEventListener("click", (event) => {
       if (event.target === elements.routePanel) actions.onCloseRoute();
@@ -130,4 +180,20 @@ export class AppView {
         element.getClientRects().length > 0,
     );
   }
+}
+
+function selectRouteCandidateAndRestoreFocus(
+  container,
+  candidateId,
+  actions,
+  restoreFocus,
+) {
+  actions.onSelectRouteCandidate(candidateId);
+  if (!restoreFocus) return;
+  queueMicrotask(() => {
+    const replacement = [
+      ...container.querySelectorAll("[data-candidate-id]"),
+    ].find((item) => item.dataset.candidateId === candidateId);
+    replacement?.focus();
+  });
 }

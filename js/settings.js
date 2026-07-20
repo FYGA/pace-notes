@@ -59,5 +59,8 @@ function normalizePreferences(preferences = {}) {
   )
     ? preferences.paceNoteProfile
     : DEFAULT_PACE_NOTE_PROFILE;
-  return { paceNoteProfile };
+  return {
+    paceNoteProfile,
+    preferWindingRoutes: preferences?.preferWindingRoutes !== false,
+  };
 }
