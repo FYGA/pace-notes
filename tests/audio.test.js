@@ -86,6 +86,22 @@ test("buildAnnouncement uses conservative and and rounded-distance connectors", 
   );
 });
 
+test("buildAnnouncement preserves explicit semantic into and profile wording", () => {
+  const first = curve({
+    profileId: "descriptive",
+    shape: "normal",
+    connectionToNext: { kind: "no-straight", meters: 8 },
+  });
+  const next = curve({
+    profileId: "descriptive",
+    direction: "R",
+    severity: 2,
+    distance: 108,
+    shape: "normal",
+  });
+  assert.equal(buildAnnouncement(first, next), "left open, into, right tight");
+});
+
 test("linked calls are queued as one atomic utterance without cancelling active speech", async () => {
   const speech = installSpeechMock();
   try {

@@ -7,6 +7,7 @@ export function collectElements(t) {
   return {
     app: e("app"),
     settingsPanel: e("settings-panel"),
+    closeSettingsButton: e("close-settings-btn"),
     savedTokenView: e("saved-token-view"),
     maskedToken: e("masked-token"),
     tokenForm: e("token-form"),
@@ -14,6 +15,7 @@ export function collectElements(t) {
     connectMapButton: e("connect-map-btn"),
     useSavedTokenButton: e("use-saved-token-btn"),
     changeTokenButton: e("change-token-btn"),
+    paceNoteProfile: e("pace-note-profile"),
     routePanel: e("route-panel"),
     routeForm: e("route-form"),
     destinationInput: e("destination-input"),
