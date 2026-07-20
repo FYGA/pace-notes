@@ -4,15 +4,15 @@ import {
   indexAtDistance,
   normalizeAngleDelta,
   toRadians,
-} from './utils.js';
+} from "./utils.js";
 
 export const SEVERITY_COLORS = Object.freeze({
-  1: '#ff5d66',
-  2: '#ff8c4b',
-  3: '#f5bd45',
-  4: '#a5d95b',
-  5: '#3ed598',
-  6: '#57d4c5',
+  1: "#ff5d66",
+  2: "#ff8c4b",
+  3: "#f5bd45",
+  4: "#a5d95b",
+  5: "#3ed598",
+  6: "#57d4c5",
 });
 
 const ANALYSIS_WINDOWS = Object.freeze([
@@ -31,19 +31,32 @@ export function analyzeCurves(coordinates) {
 
   const candidates = [];
   for (const analysisWindow of ANALYSIS_WINDOWS) {
-    candidates.push(...scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWindow));
+    candidates.push(
+      ...scanWindow(
+        coordinates,
+        cumulativeDistances,
+        totalDistance,
+        analysisWindow,
+      ),
+    );
   }
 
   const curves = deduplicateCandidates(candidates)
     .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
-    .map((curve, index) => ({ ...curve, id: `curve-${index}-${Math.round(curve.distanceFromStart)}` }));
+    .map((curve, index) => ({
+      ...curve,
+      id: `curve-${index}-${Math.round(curve.distanceFromStart)}`,
+    }));
 
-  decorateCompoundCurves(curves);
-  decorateCautions(curves);
   return curves;
 }
 
-function scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWindow) {
+function scanWindow(
+  coordinates,
+  cumulativeDistances,
+  totalDistance,
+  analysisWindow,
+) {
   const halfWindow = analysisWindow.meters / 2;
   if (totalDistance < analysisWindow.meters) return [];
 
@@ -53,14 +66,26 @@ function scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWin
     centerDistance <= totalDistance - halfWindow;
     centerDistance += analysisWindow.step
   ) {
-    const startIndex = indexAtDistance(cumulativeDistances, centerDistance - halfWindow);
+    const startIndex = indexAtDistance(
+      cumulativeDistances,
+      centerDistance - halfWindow,
+    );
     const centerIndex = indexAtDistance(cumulativeDistances, centerDistance);
-    const endIndex = indexAtDistance(cumulativeDistances, centerDistance + halfWindow);
+    const endIndex = indexAtDistance(
+      cumulativeDistances,
+      centerDistance + halfWindow,
+    );
 
     if (startIndex === centerIndex || centerIndex === endIndex) continue;
 
-    const incomingBearing = bearingDegrees(coordinates[startIndex], coordinates[centerIndex]);
-    const outgoingBearing = bearingDegrees(coordinates[centerIndex], coordinates[endIndex]);
+    const incomingBearing = bearingDegrees(
+      coordinates[startIndex],
+      coordinates[centerIndex],
+    );
+    const outgoingBearing = bearingDegrees(
+      coordinates[centerIndex],
+      coordinates[endIndex],
+    );
     const signedAngle = normalizeAngleDelta(outgoingBearing - incomingBearing);
     const absoluteAngle = Math.abs(signedAngle);
 
@@ -68,12 +93,20 @@ function scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWin
 
     const radiusMeters = estimateRadius(analysisWindow.meters, absoluteAngle);
     const severity = severityFromRadius(radiusMeters, absoluteAngle);
-    const direction = signedAngle > 0 ? 'R' : 'L';
-    const entryDistance = Math.max(0, centerDistance - Math.min(analysisWindow.meters * 0.28, 45));
+    const direction = signedAngle > 0 ? "R" : "L";
+    const entryDistance = Math.max(
+      0,
+      centerDistance - Math.min(analysisWindow.meters * 0.28, 45),
+    );
     const entryIndex = indexAtDistance(cumulativeDistances, entryDistance);
     const isHairpin = absoluteAngle >= 135 && radiusMeters < 48;
-    const isSquare = absoluteAngle >= 76 && absoluteAngle <= 104 && radiusMeters < 55;
-    const score = curveScore({ absoluteAngle, radiusMeters, weight: analysisWindow.weight });
+    const isSquare =
+      absoluteAngle >= 76 && absoluteAngle <= 104 && radiusMeters < 55;
+    const score = curveScore({
+      absoluteAngle,
+      radiusMeters,
+      weight: analysisWindow.weight,
+    });
 
     candidates.push({
       position: coordinates[entryIndex],
@@ -88,7 +121,13 @@ function scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWin
       isSquare,
       score,
       call: buildBaseCall({ direction, severity, isHairpin, isSquare }),
-      description: describeCurve({ severity, absoluteAngle, radiusMeters, isHairpin, isSquare }),
+      description: describeCurve({
+        severity,
+        absoluteAngle,
+        radiusMeters,
+        isHairpin,
+        isSquare,
+      }),
     });
   }
 
@@ -122,8 +161,13 @@ function deduplicateCandidates(candidates) {
 
   for (const candidate of sorted) {
     const duplicate = accepted.some((curve) => {
-      const separation = Math.abs(curve.distanceFromStart - candidate.distanceFromStart);
-      const threshold = Math.max(45, Math.min(95, (curve.radiusMeters + candidate.radiusMeters) * 0.55));
+      const separation = Math.abs(
+        curve.distanceFromStart - candidate.distanceFromStart,
+      );
+      const threshold = Math.max(
+        45,
+        Math.min(95, (curve.radiusMeters + candidate.radiusMeters) * 0.55),
+      );
       return curve.direction === candidate.direction && separation < threshold;
     });
 
@@ -133,70 +177,43 @@ function deduplicateCandidates(candidates) {
   return accepted;
 }
 
-function decorateCompoundCurves(curves) {
-  for (let index = 0; index < curves.length - 1; index += 1) {
-    const current = curves[index];
-    const next = curves[index + 1];
-    const gap = next.distanceFromStart - current.distanceFromStart;
-
-    if (gap > 170 || current.direction !== next.direction) continue;
-
-    if (next.severity < current.severity) {
-      current.modifier = 'tightens';
-      current.modifierSeverity = next.severity;
-    } else if (next.severity > current.severity) {
-      current.modifier = 'opens';
-      current.modifierSeverity = next.severity;
-    }
-
-    if (current.modifier) current.call = buildCallText(current);
-  }
-}
-
-function decorateCautions(curves) {
-  curves.forEach((curve, index) => {
-    const previous = curves[index - 1];
-    const gap = previous ? curve.distanceFromStart - previous.distanceFromStart : curve.distanceFromStart;
-
-    if (curve.isHairpin || (curve.severity <= 2 && curve.angle >= 100)) {
-      curve.caution = "don't cut";
-    } else if (curve.severity <= 3 && gap > 320) {
-      curve.caution = 'sudden';
-    } else if (curve.angle >= 125 && !curve.isHairpin) {
-      curve.caution = 'long';
-    }
-  });
-}
-
 function buildBaseCall({ direction, severity, isHairpin, isSquare }) {
-  const word = direction === 'L' ? 'left' : 'right';
+  const word = direction === "L" ? "left" : "right";
   if (isHairpin) return `${word} hairpin`;
   if (isSquare) return `${word} square`;
   return `${word} ${severity}`;
 }
 
 export function buildCallText(curve) {
-  const direction = curve.direction === 'L' ? 'left' : 'right';
+  const direction = curve.direction === "L" ? "left" : "right";
   if (curve.isHairpin) return `${direction} hairpin`;
   if (curve.isSquare) return `${direction} square`;
-  if (curve.modifier === 'tightens') return `${direction} ${curve.severity} tightens ${curve.modifierSeverity}`;
-  if (curve.modifier === 'opens') return `${direction} ${curve.severity} opens ${curve.modifierSeverity}`;
+  if (curve.modifier === "tightens")
+    return `${direction} ${curve.severity} tightens ${curve.modifierSeverity}`;
+  if (curve.modifier === "opens")
+    return `${direction} ${curve.severity} opens ${curve.modifierSeverity}`;
   return `${direction} ${curve.severity}`;
 }
 
-function describeCurve({ severity, absoluteAngle, radiusMeters, isHairpin, isSquare }) {
+function describeCurve({
+  severity,
+  absoluteAngle,
+  radiusMeters,
+  isHairpin,
+  isSquare,
+}) {
   const angle = Math.round(absoluteAngle);
   const radius = Math.round(radiusMeters);
   if (isHairpin) return `${angle}° hairpin · roughly ${radius} m radius`;
   if (isSquare) return `${angle}° square corner · roughly ${radius} m radius`;
 
   const labels = {
-    1: 'very tight',
-    2: 'tight',
-    3: 'medium',
-    4: 'open',
-    5: 'fast',
-    6: 'very fast',
+    1: "very tight",
+    2: "tight",
+    3: "medium",
+    4: "open",
+    5: "wide-radius",
+    6: "gentle",
   };
   return `${angle}° ${labels[severity]} curve · roughly ${radius} m radius`;
 }

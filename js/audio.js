@@ -1,26 +1,62 @@
-import { buildCallText } from './curves.js';
+import { buildCallText } from "./curves.js";
+
+const BEEP_LEAD_MS = 180;
+const AND_MAX_GAP_METERS = 50;
 
 export class AudioService {
   #enabled = true;
   #audioContext = null;
   #unlocked = false;
+  #pendingAnnouncements = [];
+  #activeAnnouncement = null;
+  #speechDelayTimer = null;
+  #speechWatchdogTimer = null;
+  #watchdogMs = speechWatchdogMs;
+
+  constructor({ watchdogMs } = {}) {
+    if (typeof watchdogMs === "function") this.#watchdogMs = watchdogMs;
+  }
 
   get enabled() {
     return this.#enabled;
   }
 
+  get queueDepth() {
+    return (
+      this.#pendingAnnouncements.length + (this.#activeAnnouncement ? 1 : 0)
+    );
+  }
+
   setEnabled(enabled) {
     this.#enabled = Boolean(enabled);
-    if (!this.#enabled) globalThis.speechSynthesis?.cancel();
+    if (!this.#enabled) this.clear();
+  }
+
+  clear() {
+    this.#pendingAnnouncements.length = 0;
+    this.#activeAnnouncement = null;
+    if (this.#speechDelayTimer !== null) {
+      globalThis.clearTimeout(this.#speechDelayTimer);
+      this.#speechDelayTimer = null;
+    }
+    if (this.#speechWatchdogTimer !== null) {
+      globalThis.clearTimeout(this.#speechWatchdogTimer);
+      this.#speechWatchdogTimer = null;
+    }
+    globalThis.speechSynthesis?.cancel();
   }
 
   async unlock() {
-    if (!this.#audioContext && (globalThis.AudioContext || globalThis.webkitAudioContext)) {
-      const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+    if (
+      !this.#audioContext &&
+      (globalThis.AudioContext || globalThis.webkitAudioContext)
+    ) {
+      const AudioContextClass =
+        globalThis.AudioContext || globalThis.webkitAudioContext;
       this.#audioContext = new AudioContextClass();
     }
 
-    if (this.#audioContext?.state === 'suspended') {
+    if (this.#audioContext?.state === "suspended") {
       try {
         await this.#audioContext.resume();
       } catch {
@@ -28,35 +64,125 @@ export class AudioService {
       }
     }
 
-    if (!this.#unlocked && 'speechSynthesis' in globalThis) {
-      const utterance = new SpeechSynthesisUtterance('');
+    if (
+      !this.#unlocked &&
+      globalThis.speechSynthesis &&
+      typeof globalThis.SpeechSynthesisUtterance === "function"
+    ) {
+      const utterance = new globalThis.SpeechSynthesisUtterance("");
       utterance.volume = 0;
       globalThis.speechSynthesis.speak(utterance);
       this.#unlocked = true;
     }
   }
 
-  announce(curve, nextCurve = null) {
+  announce(curve, nextCurve = null, { isValid = null } = {}) {
     const text = buildAnnouncement(curve, nextCurve);
     if (!this.#enabled) return text;
 
-    this.#beep(curve.severity);
-    this.#vibrate(curve.severity);
-
-    if ('speechSynthesis' in globalThis) {
-      globalThis.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.rate = 1.28;
-      utterance.pitch = 1;
-      utterance.volume = 1;
-      globalThis.speechSynthesis.speak(utterance);
-    }
+    this.#pendingAnnouncements.push({
+      text,
+      severity: curve.severity,
+      isValid: typeof isValid === "function" ? isValid : null,
+    });
+    this.#drainQueue();
 
     return text;
   }
 
+  #drainQueue() {
+    if (
+      !this.#enabled ||
+      this.#activeAnnouncement ||
+      this.#pendingAnnouncements.length === 0
+    ) {
+      return;
+    }
+
+    let announcement = this.#pendingAnnouncements.shift();
+    while (announcement && !this.#isValid(announcement)) {
+      announcement = this.#pendingAnnouncements.shift();
+    }
+    if (!announcement) return;
+    this.#activeAnnouncement = announcement;
+    this.#vibrate(announcement.severity);
+
+    const speechSynthesis = globalThis.speechSynthesis;
+    const Utterance = globalThis.SpeechSynthesisUtterance;
+    if (!speechSynthesis || typeof Utterance !== "function") {
+      this.#beep(announcement.severity);
+      this.#finishAnnouncement(announcement);
+      return;
+    }
+
+    const utterance = new Utterance(announcement.text);
+    utterance.rate = 1.28;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utterance.onend = () => this.#finishAnnouncement(announcement);
+    utterance.onerror = () => this.#finishAnnouncement(announcement);
+    announcement.utterance = utterance;
+
+    const speak = () => {
+      this.#speechDelayTimer = null;
+      if (!this.#enabled || this.#activeAnnouncement !== announcement) return;
+
+      try {
+        speechSynthesis.speak(utterance);
+        this.#speechWatchdogTimer = globalThis.setTimeout(() => {
+          if (this.#activeAnnouncement !== announcement) return;
+          speechSynthesis.cancel?.();
+          this.#finishAnnouncement(announcement);
+        }, this.#watchdogMs(announcement.text));
+      } catch {
+        this.#finishAnnouncement(announcement);
+      }
+    };
+
+    if (this.#beep(announcement.severity)) {
+      this.#speechDelayTimer = globalThis.setTimeout(speak, BEEP_LEAD_MS);
+    } else {
+      speak();
+    }
+  }
+
+  #finishAnnouncement(announcement) {
+    if (this.#activeAnnouncement !== announcement) return;
+
+    if (this.#speechDelayTimer !== null) {
+      globalThis.clearTimeout(this.#speechDelayTimer);
+      this.#speechDelayTimer = null;
+    }
+    if (this.#speechWatchdogTimer !== null) {
+      globalThis.clearTimeout(this.#speechWatchdogTimer);
+      this.#speechWatchdogTimer = null;
+    }
+    this.#activeAnnouncement = null;
+    globalThis.queueMicrotask(() => this.#drainQueue());
+  }
+
+  prune() {
+    this.#pendingAnnouncements = this.#pendingAnnouncements.filter(
+      (announcement) => this.#isValid(announcement),
+    );
+    if (this.#activeAnnouncement && !this.#isValid(this.#activeAnnouncement)) {
+      const announcement = this.#activeAnnouncement;
+      globalThis.speechSynthesis?.cancel();
+      this.#finishAnnouncement(announcement);
+    }
+  }
+
+  #isValid(announcement) {
+    if (!announcement?.isValid) return true;
+    try {
+      return announcement.isValid() !== false;
+    } catch {
+      return false;
+    }
+  }
+
   #beep(severity) {
-    if (!this.#audioContext) return;
+    if (!this.#audioContext) return false;
 
     try {
       const oscillator = this.#audioContext.createOscillator();
@@ -64,23 +190,29 @@ export class AudioService {
       oscillator.connect(gain);
       gain.connect(this.#audioContext.destination);
 
-      oscillator.type = 'sine';
-      oscillator.frequency.value = severity <= 2 ? 880 : severity <= 4 ? 660 : 520;
+      oscillator.type = "sine";
+      oscillator.frequency.value =
+        severity <= 2 ? 880 : severity <= 4 ? 660 : 520;
       gain.gain.setValueAtTime(0.26, this.#audioContext.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.01, this.#audioContext.currentTime + 0.15);
+      gain.gain.exponentialRampToValueAtTime(
+        0.01,
+        this.#audioContext.currentTime + 0.15,
+      );
       oscillator.start();
       oscillator.stop(this.#audioContext.currentTime + 0.15);
+      return true;
     } catch {
       // Audio feedback is optional.
+      return false;
     }
   }
 
   #vibrate(severity) {
-    if (!navigator.vibrate) return;
-    if (severity <= 1) navigator.vibrate([100, 50, 100, 50, 100]);
-    else if (severity <= 2) navigator.vibrate([100, 50, 100]);
-    else if (severity <= 3) navigator.vibrate(80);
-    else if (severity <= 5) navigator.vibrate(40);
+    if (!globalThis.navigator?.vibrate) return;
+    if (severity <= 1) globalThis.navigator.vibrate([100, 50, 100, 50, 100]);
+    else if (severity <= 2) globalThis.navigator.vibrate([100, 50, 100]);
+    else if (severity <= 3) globalThis.navigator.vibrate(80);
+    else if (severity <= 5) globalThis.navigator.vibrate(40);
   }
 }
 
@@ -89,11 +221,30 @@ export function buildAnnouncement(curve, nextCurve = null) {
   if (curve.caution) text += `, caution ${curve.caution}`;
 
   if (nextCurve) {
-    const gap = nextCurve.distance - curve.distance;
-    if (gap > 20 && gap <= 200) {
-      text += `, ${Math.round(gap / 10) * 10}, ${buildCallText(nextCurve)}`;
-    }
+    const gap = routeDistance(nextCurve) - routeDistance(curve);
+    const connector = buildConnector(gap);
+    text += `, ${connector}, ${buildCallText(nextCurve)}`;
   }
 
   return text;
+}
+
+function routeDistance(curve) {
+  if (Number.isFinite(curve?.distance)) return curve.distance;
+  if (Number.isFinite(curve?.distanceFromStart)) return curve.distanceFromStart;
+  return Number.NaN;
+}
+
+function buildConnector(gap) {
+  if (!Number.isFinite(gap)) return "and";
+  if (gap <= AND_MAX_GAP_METERS) return "and";
+  return String(Math.max(10, Math.round(gap / 10) * 10));
+}
+
+function speechWatchdogMs(text) {
+  const words = String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+  return Math.max(2_500, Math.min(12_000, 2_000 + words * 550));
 }

@@ -1,8 +1,12 @@
 export class Recorder {
+  static MAX_TRACK_POINTS = 30_000;
+
   #active = false;
   #startedAt = null;
   #track = [];
   #notes = [];
+  #minimumTrackIntervalMs = 250;
+  #lastTrackTimeMs = -Infinity;
 
   get active() {
     return this.#active;
@@ -13,17 +17,30 @@ export class Recorder {
     this.#startedAt = Date.now();
     this.#track = [];
     this.#notes = [];
+    this.#minimumTrackIntervalMs = 250;
+    this.#lastTrackTimeMs = -Infinity;
   }
 
-  addTrackPoint({ position, speedMph, heading, accuracyMeters }) {
+  addTrackPoint({ position, speedMph, heading, accuracyMeters, timestamp }) {
     if (!this.#active || !position) return;
+    const timeMs = Number.isFinite(timestamp)
+      ? Math.max(0, timestamp - this.#startedAt)
+      : Date.now() - this.#startedAt;
+    if (timeMs - this.#lastTrackTimeMs < this.#minimumTrackIntervalMs) return;
+
+    if (this.#track.length >= Recorder.MAX_TRACK_POINTS) {
+      this.#track = this.#track.filter((_, index) => index % 2 === 0);
+      this.#minimumTrackIntervalMs *= 2;
+    }
+
     this.#track.push({
       position: [...position],
       speedMph,
       heading,
       accuracyMeters,
-      timeMs: Date.now() - this.#startedAt,
+      timeMs,
     });
+    this.#lastTrackTimeMs = timeMs;
   }
 
   addPaceNote(curve, spokenText) {
@@ -37,11 +54,11 @@ export class Recorder {
       angle: curve.angle,
       radiusMeters: curve.radiusMeters,
       caution: curve.caution || null,
-      timeMds: Date.now() - this.#startedAt,
+      timeMs: Date.now() - this.#startedAt,
     });
   }
 
-  stop({ routeName = 'Route' } = {}) {
+  stop({ routeName = "Route" } = {}) {
     if (!this.#active) return null;
 
     this.#active = false;
@@ -62,15 +79,17 @@ export class Recorder {
   download(data) {
     if (!data || data.trackPoints < 2) return false;
 
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
+    const anchor = document.createElement("a");
     anchor.href = url;
     anchor.download = `pace-notes-${Date.now()}.json`;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    URL.revokeObjectURL(url);
+    setTimeout(() => URL.revokeObjectURL(url), 1_000);
     return true;
   }
 }

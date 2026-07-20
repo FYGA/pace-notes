@@ -1,1 +1,855 @@
-import{AudioService as e}from"./audio.js";import{analyzeCurves as t}from"./curves.js";import{DEMO_ROUTE as s,DemoRunner as o}from"./demo.js";import{MapController as i}from"./map.js";import{Recorder as n}from"./recording.js";import{MapboxClient as r}from"./routing.js";import{SessionTracker as a,WakeLockService as d}from"./session.js";import{loadMapboxToken as h,maskToken as u,saveMapboxToken as c}from"./settings.js";import{createInitialState as l,Store as m}from"./state.js";import{PositionTracker as p}from"./tracking.js";import{AppView as g}from"./ui.js";import{buildCumulativeDistances as w,closestRoutePoint as v,distanceMeters as f}from"./utils.js";const k=Object.freeze({1:5,2:4.5,3:4,4:3.5,5:3,6:2.5});export class PaceNotesApp{#e;#t;#s=new i;#o=new r;#i=new p;#n=new e;#r=new a;#a=new n;#d=new o;#h;#u="";#c=null;#l=null;#m=!1;#p=!1;#g=null;constructor(){this.#u=h(),this.#e=new m(l({hasSavedToken:Boolean(this.#u),maskedToken:u(this.#u)})),this.#t=new g(document),this.#h=new d(e=>{this.#e.update(t=>({...t,wakeLockActive:e}))})}start(){this.#e.subscribe(e=>this.#t.render(e)),this.#t.bind({onSaveToken:e=>this.#w(e),onUseSavedToken:()=>this.#w(this.#u),onChangeToken:()=>this.#v(),onLoadRoute:e=>this.#f(e),onCloseRoute:()=>this.#k(),onStartDriving:()=>this.#T(),onToggleTracking:()=>this.#y(),onToggleDemo:()=>this.#C(),onOpenRoute:()=>this.#b(),onToggleRecording:()=>this.#R(),onCenterMap:()=>this.#S(),onToggleSound:()=>this.#M(),onOpenSettings:()=>this.#I(),onUserGesture:()=>this.#n.unlock()}),this.#g=setInterval(()=>{if(!this.#r.active)return;const e=this.#r.snapshot();this.#e.update(t=>({...t,session:e}))},1e3),document.addEventListener("visibilitychange",()=>{const e=this.#e.getState().mode;"visible"!==document.visibilityState||"tracking"!==e&&"demo"!==e||this.#h.request()})}async#w(e){if(e){this.#e.update(e=>({...e,busy:!0})),this.#o.setToken(e),this.#u=e,c(e);try{this.#s.ready||await this.#s.initialize(e),this.#e.update(t=>({...t,initialized:!0,mapReady:!0,busy:!1,hasSavedToken:!0,maskedToken:u(e),ui:{...t.ui,settingsOpen:!1,routeOpen:!0,showTokenInput:!1}})),this.#t.focusDestination(),this.#t.showToast("Mapbox connected.",{tone:"success"})}catch(e){this.#e.update(e=>({...e,busy:!1})),this.#t.showToast(e.message||"Could not initialize the map.",{tone:"error",duration:3600})}}else this.#t.showToast("Enter a Mapbox public token.",{tone:"error"})}#v(){this.#e.update(e=>({...e,ui:{...e.ui,showTokenInput:!0}})),this.#t.clearTokenInput()}async#f(e){if(!e)return void this.#t.showToast("Enter a destination.",{tone:"error"});this.#c?.abort(),this.#c=new AbortController;const t=this.#c.signal;this.#e.update(e=>({...e,busy:!0,mode:"loading-route"}));try{const s=await this.#o.geocode(e,{signal:t});if(!s)throw new Error("Destination not found. Try a more specific search.");const o=await this.#i.getCurrentPosition();this.#s.setUserPosition(o.position,o.heading||0);const i=await this.#o.directions(o.position,s.coordinates,{signal:t});if(!i||i.coordinates.length<8)throw new Error("Mapbox returned a route that is too short to analyze.");const n=T(s.name,i);this.#s.setRoute(n),this.#l=null,this.#p=!1,this.#e.update(e=>({...e,busy:!1,mode:"idle",telemetry:{...e.telemetry,...o},route:n})),this.#t.showToast(`Route ready · ${n.curves.length} curves`,{tone:"success"})}catch(e){if("AbortError"===e.name)return;this.#e.update(e=>({...e,busy:!1,mode:"idle"})),this.#t.showToast(e.message||"Could not load that route.",{tone:"error",duration:3800})}}async#b(){await this.#N(),this.#e.update(e=>({...e,ui:{...e.ui,routeOpen:!0,settingsOpen:!1}})),this.#t.focusDestination()}#k(){this.#e.update(e=>({...e,ui:{...e.ui,routeOpen:!1}}))}async#I(){await this.#N(),this.#e.update(e=>({...e,ui:{...e.ui,settingsOpen:!0,routeOpen:!1,showTokenInput:!e.hasSavedToken}}))}#y(){"tracking"===this.#e.getState().mode?this.#x():this.#T()}async#T(){const e=this.#e.getState();if(!e.route.loaded)return void this.#t.showToast("Load a route first.",{tone:"error"});"demo"===e.mode&&await this.#P(),this.#i.stop(),this.#r.start(),this.#l=null,this.#m=!1,this.#p=!1;const t=y(this.#e.getState().route);this.#e.update(e=>({...e,mode:"tracking",route:t,session:this.#r.snapshot(),ui:{...e.ui,routeOpen:!1,settingsOpen:!1,followUser:!0}})),await this.#h.request(),this.#i.start({onPosition:e=>this.#D(e,{demo:!1}),onError:e=>this.#t.showToast(e.message,{tone:"error",duration:3600})}),this.#t.showToast("GPS tracking started.",{tone:"success"})}async#x(){this.#i.stop(),await this.#h.release(),this.#a.active&&this.#O(),this.#r.stop(),this.#e.update(e=>({...e,mode:"idle",session:{...this.#r.snapshot(),active:!1},telemetry:{...e.telemetry,speedMph:0}}))}#C(){const e=this.#e.getState().mode;"demo"===e?this.#P():"loading-demo"!==e&&this.#j()}async#j(){await this.#N(),this.#e.update(e=>({...e,busy:!0,mode:"loading-demo"}));try{const e=await this.#o.directions(s.start,s.end);if(!e||e.coordinates.length<8)throw new Error("Demo route could not be loaded.");const t=T(s.name,e);this.#s.setRoute(t),this.#r.start(),this.#l=null,this.#m=!1,this.#p=!1,this.#e.update(e=>({...e,busy:!1,mode:"demo",route:t,session:this.#r.snapshot(),ui:{...e.ui,routeOpen:!1,settingsOpen:!1,followUser:!0}})),await this.#h.request(),this.#d.start(t,{onPosition:e=>this.#D(e,{demo:!0}),onLoop:()=>{this.#l=null,this.#e.update(e=>({...e,route:y(e.route)}))}}),this.#t.showToast("Pikes Peak demo started.",{tone:"success"})}catch(e){this.#e.update(e=>({...e,busy:!1,mode:"idle"})),this.#t.showToast(e.message||"Could not start the demo.",{tone:"error"})}}async#P(){this.#d.stop(),await this.#h.release(),this.#a.active&&this.#O(),this.#r.stop(),this.#e.update(e=>({...e,mode:"idle",session:{...this.#r.snapshot(),active:!1},telemetry:{...e.telemetry,speedMph:0}}))}async#N(){const e=this.#e.getState().mode;"tracking"===e&&await this.#x(),"demo"===e&&await this.#P()}#D(e,{demo:t}){const s=this.#e.getState();if(!t&&"tracking"!==s.mode||t&&"demo"!==s.mode)return;if(!s.route.loaded)return;const o=Number.isFinite(e.heading)?e.heading:s.telemetry.heading,i=v(e.position,s.route.coordinates,s.route.closestIndex),n=s.route.cumulativeDistances[i.index]||0,r=s.route.curves.map(e=>({...e,distance:Math.round(e.distanceFromStart-n)})).filter(e=>e.distance>-25).sort((e,t)=>e.distance-t.distance),a=!t&&i.distance>100;a&&!this.#m?(this.#m=!0,this.#t.showToast("You appear to be off route.",{tone:"error"})):i.distance<50&&(this.#m=!1);let d=this.#r.update(e.position,e.speedMph);const h=r[0];if(h&&this.#L(h,e.speedMph)){this.#l=h.id,d=this.#r.incrementTurns();const e=this.#n.announce(h,r[1]);this.#a.addPaceNote(h,e),this.#t.flashCall()}this.#a.addTrackPoint({...e,heading:o});const u={...s.route,remainingCurves:r,closestIndex:i.index},c={...e,heading:o,offRoute:a};this.#e.update(e=>({...e,route:u,telemetry:c,session:d})),this.#s.setUserPosition(e.position,o||0,{follow:s.ui.followUser,animate:!0});f(e.position,s.route.endPoint)<55&&0===r.length&&!this.#p&&(this.#p=!0,this.#t.showToast("Route complete.",{tone:"success",duration:4e3}))}#L(e,t){if(e.id===this.#l)return!1;const s=.44704*Math.max(0,t),o=Math.max(60,s*(k[e.severity]||4));return e.distance<=o&&e.distance>10}#R(){const e=this.#e.getState();"tracking"!==e.mode&&"demo"!==e.mode||(this.#a.active?this.#O():(this.#a.start(),this.#e.update(e=>({...e,recording:{active:!0}})),this.#t.showToast("Recording started.",{tone:"success"})))}#O(){const e=this.#e.getState(),t=this.#a.stop({routeName:e.route.name}),s=this.#a.download(t);this.#e.update(e=>({...e,recording:{active:!1}})),this.#t.showToast(s?`Saved ${t.paceNoteCount} pace notes.`:"Not enough track data to save.",{tone:s?"success":"error"})}#S(){this.#e.update(e=>({...e,ui:{...e.ui,followUser:!0}})),this.#s.followUser({animate:!0})}#M(){const e=!this.#e.getState().soundEnabled;this.#n.setEnabled(e),this.#e.update(t=>({...t,soundEnabled:e})),this.#t.showToast(e?"Voice callouts on.":"Voice callouts muted.")}}function T(e,s){const o=w(s.coordinates),i=t(s.coordinates);return{loaded:!0,name:e,coordinates:s.coordinates,cumulativeDistances:o,distanceMeters:s.distanceMeters,durationSeconds:s.durationSeconds,curves:i,remainingCurves:i.map(e=>({...e,distance:Math.round(e.distanceFromStart)})),endPoint:s.coordinates.at(-1),closestIndex:0}}function y(e){return{...e,closestIndex:0,remainingCurves:e.curves.map(e=>({...e,distance:Math.round(e.distanceFromStart)}))}}
+import { AudioService } from "./audio.js";
+import { analyzeCurves } from "./curves.js";
+import { DEMO_ROUTE, DemoRunner } from "./demo.js";
+import {
+  canConfirmRouteDirection,
+  CallScheduler,
+  evaluateTelemetryQuality,
+  isRouteHeadingCompatible,
+} from "./drive.js";
+import { MapController } from "./map.js";
+import { Recorder } from "./recording.js";
+import { MapboxClient } from "./routing.js";
+import { SessionTracker, WakeLockService } from "./session.js";
+import { loadMapboxToken, maskToken, saveMapboxToken } from "./settings.js";
+import { createInitialState, Store } from "./state.js";
+import { PositionTracker } from "./tracking.js";
+import { AppView } from "./ui.js";
+import {
+  buildCumulativeDistances,
+  closestRoutePoint,
+  distanceMeters,
+} from "./utils.js";
+
+const OFF_ROUTE_METERS = 60;
+const BACK_ON_ROUTE_METERS = 35;
+const COMPLETE_DISTANCE_METERS = 55;
+const MIN_HEADING_CHECK_SPEED_MPH = 8;
+
+export class PaceNotesApp {
+  #store;
+  #view;
+  #map = new MapController();
+  #routing = new MapboxClient();
+  #positionTracker = new PositionTracker();
+  #audio = new AudioService();
+  #session = new SessionTracker();
+  #recorder = new Recorder();
+  #demo = new DemoRunner();
+  #wakeLock;
+  #scheduler = new CallScheduler();
+  #token = "";
+  #routeAbortController = null;
+  #demoAbortController = null;
+  #offRouteLatched = false;
+  #callsPaused = false;
+  #resyncAwaitingHeading = false;
+  #directionConfirmed = false;
+  #routeCompleted = false;
+  #sessionTimer = null;
+  #modeGeneration = 0;
+  #stopPromise = null;
+
+  constructor() {
+    this.#token = loadMapboxToken();
+    this.#store = new Store(
+      createInitialState({
+        hasSavedToken: Boolean(this.#token),
+        maskedToken: maskToken(this.#token),
+      }),
+    );
+    this.#view = new AppView(document);
+    this.#wakeLock = new WakeLockService((active) => {
+      this.#store.update((state) => ({ ...state, wakeLockActive: active }));
+    });
+    this.#map.setManualMoveHandler?.(() => {
+      this.#store.update((state) => ({
+        ...state,
+        ui: { ...state.ui, followUser: false },
+      }));
+    });
+  }
+
+  start() {
+    this.#store.subscribe((state) => this.#view.render(state));
+    this.#view.bind({
+      onSaveToken: (token) => this.#saveToken(token),
+      onUseSavedToken: () => this.#saveToken(this.#token),
+      onChangeToken: () => this.#changeToken(),
+      onLoadRoute: (destination) => this.#loadRoute(destination),
+      onCloseRoute: () => this.#closeRoute(),
+      onStartDriving: () => this.#startTracking(),
+      onToggleTracking: () => this.#toggleTracking(),
+      onToggleDemo: () => this.#toggleDemo(),
+      onOpenRoute: () => this.#openRoute(),
+      onToggleRecording: () => this.#toggleRecording(),
+      onCenterMap: () => this.#centerMap(),
+      onToggleSound: () => this.#toggleSound(),
+      onOpenSettings: () => this.#openSettings(),
+      onUserGesture: () => this.#audio.unlock(),
+    });
+
+    this.#sessionTimer = setInterval(() => {
+      if (!this.#session.active) return;
+      this.#checkGpsHeartbeat();
+      this.#store.update((state) => ({
+        ...state,
+        session: this.#session.snapshot(),
+      }));
+    }, 1_000);
+
+    document.addEventListener("visibilitychange", () => {
+      const mode = this.#store.getState().mode;
+      if (
+        document.visibilityState === "visible" &&
+        (mode === "tracking" || mode === "demo")
+      ) {
+        this.#wakeLock.request();
+      }
+    });
+  }
+
+  async #saveToken(token) {
+    if (this.#store.getState().busy) return;
+    if (!token) {
+      this.#view.showToast("Enter a Mapbox public token.", { tone: "error" });
+      return;
+    }
+
+    this.#store.update((state) => ({ ...state, busy: true }));
+    this.#routing.setToken(token);
+
+    try {
+      await this.#routing.validateToken();
+      if (this.#map.ready) this.#map.setToken(token);
+      else await this.#map.initialize(token);
+
+      this.#token = token;
+      saveMapboxToken(token);
+      this.#store.update((state) => ({
+        ...state,
+        initialized: true,
+        mapReady: true,
+        busy: false,
+        hasSavedToken: true,
+        maskedToken: maskToken(token),
+        ui: {
+          ...state.ui,
+          settingsOpen: false,
+          routeOpen: true,
+          showTokenInput: false,
+        },
+      }));
+      this.#view.focusDestination();
+      this.#view.showToast("Mapbox connected.", { tone: "success" });
+    } catch (error) {
+      this.#routing.setToken(this.#token);
+      this.#store.update((state) => ({ ...state, busy: false }));
+      this.#view.showToast(error.message || "Could not initialize the map.", {
+        tone: "error",
+        duration: 3_600,
+      });
+    }
+  }
+
+  #changeToken() {
+    this.#store.update((state) => ({
+      ...state,
+      ui: { ...state.ui, showTokenInput: true },
+    }));
+    this.#view.clearTokenInput();
+  }
+
+  async #loadRoute(destination) {
+    if (!destination) {
+      this.#view.showToast("Enter a destination.", { tone: "error" });
+      return;
+    }
+
+    await this.#stopActiveMode();
+    this.#routeAbortController?.abort();
+    const controller = new AbortController();
+    this.#routeAbortController = controller;
+    this.#store.update((state) => ({
+      ...state,
+      busy: true,
+      mode: "loading-route",
+    }));
+
+    try {
+      const destinationResult = await this.#routing.geocode(destination, {
+        signal: controller.signal,
+      });
+      if (!destinationResult) {
+        throw new Error("Destination not found. Try a more specific search.");
+      }
+
+      const telemetry = await this.#positionTracker.getCurrentPosition();
+      this.#map.setUserPosition(telemetry.position, telemetry.heading || 0);
+      const result = await this.#routing.directions(
+        telemetry.position,
+        destinationResult.coordinates,
+        { signal: controller.signal },
+      );
+      if (!result || result.coordinates.length < 8) {
+        throw new Error("The route is too short to analyze.");
+      }
+
+      if (this.#routeAbortController !== controller) return;
+      const route = buildRoute(destinationResult.name, result);
+      this.#scheduler.reset(route.curves);
+      this.#map.setRoute(route);
+      this.#offRouteLatched = false;
+      this.#callsPaused = false;
+      this.#resyncAwaitingHeading = false;
+      this.#directionConfirmed = false;
+      this.#routeCompleted = false;
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "idle",
+        telemetry: { ...state.telemetry, ...telemetry },
+        route,
+      }));
+      this.#view.showToast(`Route ready · ${route.curves.length} curves`, {
+        tone: "success",
+      });
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      if (this.#routeAbortController !== controller) return;
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "idle",
+      }));
+      this.#view.showToast(error.message || "Could not load that route.", {
+        tone: "error",
+        duration: 3_800,
+      });
+    } finally {
+      if (this.#routeAbortController === controller) {
+        this.#routeAbortController = null;
+      }
+    }
+  }
+
+  async #openRoute() {
+    await this.#stopActiveMode();
+    this.#store.update((state) => ({
+      ...state,
+      ui: { ...state.ui, routeOpen: true, settingsOpen: false },
+    }));
+    this.#view.focusDestination();
+  }
+
+  #closeRoute() {
+    this.#store.update((state) => ({
+      ...state,
+      ui: { ...state.ui, routeOpen: false },
+    }));
+  }
+
+  async #openSettings() {
+    await this.#stopActiveMode();
+    this.#store.update((state) => ({
+      ...state,
+      ui: {
+        ...state.ui,
+        settingsOpen: true,
+        routeOpen: false,
+        showTokenInput: !state.hasSavedToken,
+      },
+    }));
+  }
+
+  #toggleTracking() {
+    if (this.#store.getState().mode === "tracking") this.#stopActiveMode();
+    else this.#startTracking();
+  }
+
+  async #startTracking() {
+    if (this.#stopPromise) await this.#stopPromise;
+    const state = this.#store.getState();
+    if (!state.route.loaded) {
+      this.#view.showToast("Load a route first.", { tone: "error" });
+      return;
+    }
+
+    if (state.mode === "demo") await this.#stopActiveMode();
+    const generation = ++this.#modeGeneration;
+    this.#positionTracker.stop();
+    this.#session.start();
+    this.#scheduler.reset(state.route.curves);
+    this.#offRouteLatched = false;
+    this.#callsPaused = false;
+    this.#resyncAwaitingHeading = false;
+    this.#directionConfirmed = false;
+    this.#routeCompleted = false;
+    const route = resetRouteProgress(this.#store.getState().route);
+
+    this.#store.update((current) => ({
+      ...current,
+      mode: "tracking",
+      route,
+      session: this.#session.snapshot(),
+      telemetry: {
+        ...current.telemetry,
+        offRoute: false,
+        gpsUsable: false,
+        gpsStatus: "Waiting for GPS position",
+      },
+      ui: {
+        ...current.ui,
+        routeOpen: false,
+        settingsOpen: false,
+        followUser: true,
+      },
+    }));
+
+    try {
+      this.#positionTracker.start({
+        onPosition: (telemetry) => {
+          if (generation !== this.#modeGeneration) return;
+          this.#handlePosition(telemetry, { demo: false });
+        },
+        onError: (error) => {
+          if (generation !== this.#modeGeneration) return;
+          this.#handleTrackingError(error);
+        },
+      });
+    } catch (error) {
+      this.#handleTrackingError(error);
+      await this.#stopActiveMode();
+      return;
+    }
+    void this.#requestWakeLockFor("tracking", generation);
+    this.#view.showToast("GPS tracking started.", { tone: "success" });
+  }
+
+  #toggleDemo() {
+    const mode = this.#store.getState().mode;
+    if (mode === "demo") this.#stopActiveMode();
+    else if (mode === "loading-demo") {
+      this.#demoAbortController?.abort();
+      this.#demoAbortController = null;
+      this.#modeGeneration += 1;
+      this.#store.update((state) => ({ ...state, busy: false, mode: "idle" }));
+    } else this.#startDemo();
+  }
+
+  async #startDemo() {
+    await this.#stopActiveMode();
+    if (
+      this.#store.getState().busy ||
+      this.#store.getState().mode === "loading-demo"
+    ) {
+      return;
+    }
+    const generation = ++this.#modeGeneration;
+    const controller = new AbortController();
+    this.#demoAbortController = controller;
+    this.#store.update((state) => ({
+      ...state,
+      busy: true,
+      mode: "loading-demo",
+    }));
+
+    try {
+      const result = await this.#routing.directions(
+        DEMO_ROUTE.start,
+        DEMO_ROUTE.end,
+        { signal: controller.signal },
+      );
+      if (
+        generation !== this.#modeGeneration ||
+        this.#store.getState().mode !== "loading-demo"
+      )
+        return;
+      if (!result || result.coordinates.length < 8) {
+        throw new Error("Demo route could not be loaded.");
+      }
+
+      const route = buildRoute(DEMO_ROUTE.name, result);
+      this.#map.setRoute(route);
+      this.#session.start();
+      this.#scheduler.reset(route.curves);
+      this.#offRouteLatched = false;
+      this.#callsPaused = false;
+      this.#resyncAwaitingHeading = false;
+      this.#directionConfirmed = true;
+      this.#routeCompleted = false;
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "demo",
+        route,
+        session: this.#session.snapshot(),
+        ui: {
+          ...state.ui,
+          routeOpen: false,
+          settingsOpen: false,
+          followUser: true,
+        },
+      }));
+      this.#demo.start(route, {
+        onPosition: (telemetry) => {
+          if (generation !== this.#modeGeneration) return;
+          this.#handlePosition(telemetry, { demo: true });
+        },
+        onLoop: () => {
+          if (generation !== this.#modeGeneration) return;
+          this.#audio.clear();
+          this.#scheduler.reset(route.curves);
+          this.#callsPaused = false;
+          this.#routeCompleted = false;
+          this.#store.update((state) => ({
+            ...state,
+            route: resetRouteProgress(state.route),
+          }));
+        },
+      });
+      void this.#requestWakeLockFor("demo", generation);
+      this.#view.showToast("Pikes Peak demo started.", { tone: "success" });
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      if (
+        this.#demoAbortController !== controller ||
+        generation !== this.#modeGeneration
+      )
+        return;
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "idle",
+      }));
+      this.#view.showToast(error.message || "Could not start the demo.", {
+        tone: "error",
+      });
+    } finally {
+      if (this.#demoAbortController === controller) {
+        this.#demoAbortController = null;
+      }
+    }
+  }
+
+  #stopActiveMode({ completed = false } = {}) {
+    if (this.#stopPromise) return this.#stopPromise;
+    const mode = this.#store.getState().mode;
+    if (mode !== "tracking" && mode !== "demo") return Promise.resolve();
+    this.#modeGeneration += 1;
+    this.#stopPromise = this.#performStop(mode, { completed }).finally(() => {
+      this.#stopPromise = null;
+    });
+    return this.#stopPromise;
+  }
+
+  async #performStop(mode, { completed }) {
+    this.#store.update((state) => ({ ...state, busy: true, mode: "stopping" }));
+
+    if (mode === "tracking") this.#positionTracker.stop();
+    if (mode === "demo") this.#demo.stop();
+    let recordingResult = { saved: false, data: null };
+    try {
+      recordingResult = this.#stopRecording({ notify: false });
+    } catch {
+      // A failed browser download must not prevent navigation teardown.
+    }
+    const finalSession = this.#session.stop();
+    this.#audio.clear();
+
+    try {
+      await this.#wakeLock.release();
+    } catch {
+      // Wake lock support is optional and teardown must remain recoverable.
+    } finally {
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "idle",
+        session: { ...finalSession, active: false },
+        telemetry: {
+          ...state.telemetry,
+          speedMph: 0,
+          gpsUsable: false,
+          gpsStatus: completed ? "Route complete" : null,
+        },
+      }));
+    }
+
+    if (completed) {
+      const suffix = recordingResult.saved
+        ? " Recording download requested."
+        : "";
+      this.#view.showToast(`Route complete.${suffix}`, {
+        tone: "success",
+        duration: 4_000,
+      });
+    }
+  }
+
+  async #requestWakeLockFor(mode, generation) {
+    await this.#wakeLock.request();
+    if (
+      generation !== this.#modeGeneration ||
+      this.#store.getState().mode !== mode
+    ) {
+      await this.#wakeLock.release();
+    }
+  }
+
+  #handlePosition(telemetry, { demo }) {
+    const state = this.#store.getState();
+    if ((!demo && state.mode !== "tracking") || (demo && state.mode !== "demo"))
+      return;
+    if (!state.route.loaded) return;
+
+    const heading = Number.isFinite(telemetry.heading)
+      ? telemetry.heading
+      : state.telemetry.heading;
+    const quality = evaluateTelemetryQuality(telemetry, { demo });
+    const match = closestRoutePoint(
+      telemetry.position,
+      state.route.coordinates,
+      {
+        cumulativeDistances: state.route.cumulativeDistances,
+        previousDistanceAlongRoute: state.route.progressMeters,
+        heading,
+      },
+    );
+    let callUsable = quality.usable;
+    let gpsStatus = quality.reason;
+    const moving = telemetry.speedMph >= MIN_HEADING_CHECK_SPEED_MPH;
+    const directionCompatible = canConfirmRouteDirection({
+      heading,
+      headingDelta: match.headingDelta,
+      speedMph: telemetry.speedMph,
+    });
+    if (!demo && callUsable && !this.#directionConfirmed) {
+      if (directionCompatible) {
+        this.#directionConfirmed = true;
+      } else {
+        callUsable = false;
+        gpsStatus = "Waiting to confirm direction of travel";
+      }
+    } else if (!demo && callUsable && moving && !directionCompatible) {
+      callUsable = false;
+      gpsStatus = Number.isFinite(heading)
+        ? "Wrong direction — pace notes paused"
+        : "Waiting for direction of travel";
+    }
+
+    if (!demo && this.#resyncAwaitingHeading) {
+      const directionConfirmed =
+        quality.usable && !match.reacquired && directionCompatible;
+      if (directionConfirmed) {
+        this.#resyncAwaitingHeading = false;
+        this.#directionConfirmed = true;
+      } else {
+        callUsable = false;
+        gpsStatus = "Route found — waiting to confirm direction";
+      }
+    }
+
+    const previousTimestamp = state.telemetry.timestamp;
+    const elapsedSeconds = Number.isFinite(previousTimestamp)
+      ? Math.max(0, (telemetry.timestamp - previousTimestamp) / 1_000)
+      : 0;
+    const plausibleProgressDelta = Math.max(
+      150,
+      elapsedSeconds * 90 + (telemetry.accuracyMeters || 0) * 2,
+    );
+    const progressJump = Math.abs(
+      match.distanceAlongRoute - state.route.progressMeters,
+    );
+    if (
+      !demo &&
+      callUsable &&
+      !match.reacquired &&
+      state.route.progressMeters > 0 &&
+      progressJump > plausibleProgressDelta
+    ) {
+      callUsable = false;
+      gpsStatus = "Implausible GPS jump — pace notes paused";
+    }
+
+    const accuracyAllowance = Number.isFinite(telemetry.accuracyMeters)
+      ? telemetry.accuracyMeters * 1.5
+      : 0;
+    const offRouteThreshold = Math.max(OFF_ROUTE_METERS, accuracyAllowance);
+    const wasOffRoute = this.#offRouteLatched;
+    if (!demo) {
+      if (
+        this.#offRouteLatched &&
+        callUsable &&
+        match.distance < BACK_ON_ROUTE_METERS
+      ) {
+        this.#offRouteLatched = false;
+      } else if (
+        !this.#offRouteLatched &&
+        callUsable &&
+        match.distance > offRouteThreshold
+      ) {
+        this.#offRouteLatched = true;
+      }
+    }
+    const offRoute = !demo && this.#offRouteLatched;
+
+    let progressMeters =
+      callUsable && !offRoute
+        ? match.distanceAlongRoute
+        : state.route.progressMeters;
+    const resynced =
+      !demo &&
+      quality.usable &&
+      match.reacquired &&
+      match.distance <= offRouteThreshold &&
+      isRouteHeadingCompatible({
+        heading,
+        headingDelta: match.headingDelta,
+        speedMph: telemetry.speedMph,
+      });
+    if (resynced) {
+      progressMeters = match.distanceAlongRoute;
+      callUsable = false;
+      this.#resyncAwaitingHeading = true;
+      this.#directionConfirmed = false;
+      gpsStatus = "Route position reacquired — confirming direction";
+      this.#scheduler.rebase(state.route.curves, progressMeters);
+      this.#audio.clear();
+    }
+
+    if (offRoute && !wasOffRoute) {
+      this.#view.showToast("Off route. Pace notes paused.", {
+        tone: "error",
+        duration: 3_600,
+      });
+    } else if (wasOffRoute && !offRoute) {
+      this.#view.showToast("Back on route. Pace notes resumed.", {
+        tone: "success",
+      });
+    }
+
+    const canAnnounce = callUsable && !offRoute && !resynced;
+    if (!canAnnounce && !this.#callsPaused) {
+      this.#audio.clear();
+      this.#scheduler.rebase(state.route.curves, progressMeters);
+      this.#callsPaused = true;
+    } else if (canAnnounce && this.#callsPaused) {
+      this.#callsPaused = false;
+    }
+
+    const schedule = this.#scheduler.update({
+      curves: state.route.curves,
+      progressMeters,
+      speedMph: telemetry.speedMph,
+      canAnnounce: canAnnounce && this.#audio.queueDepth < 2,
+    });
+
+    let session = this.#session.snapshot();
+    if (quality.usable && !offRoute) {
+      session = this.#session.update(telemetry.position, telemetry.speedMph, {
+        timestamp: telemetry.timestamp,
+        accuracyMeters: telemetry.accuracyMeters,
+      });
+    }
+
+    const announcement = schedule.announcement;
+    if (announcement) {
+      session = this.#session.incrementTurns();
+      if (schedule.linkedCurve) session = this.#session.incrementTurns();
+      const generation = this.#modeGeneration;
+      const finalCurveDistance =
+        schedule.linkedCurve?.distanceFromStart ??
+        announcement.distanceFromStart;
+      const spokenText = this.#audio.announce(
+        announcement,
+        schedule.linkedCurve,
+        {
+          isValid: () => {
+            const current = this.#store.getState();
+            return (
+              generation === this.#modeGeneration &&
+              (current.mode === "tracking" || current.mode === "demo") &&
+              current.route.progressMeters <= finalCurveDistance + 8
+            );
+          },
+        },
+      );
+      this.#recorder.addPaceNote(announcement, spokenText);
+      if (schedule.linkedCurve) {
+        this.#recorder.addPaceNote(schedule.linkedCurve, spokenText);
+      }
+      this.#view.flashCall();
+    }
+
+    if (quality.usable && !offRoute) {
+      this.#recorder.addTrackPoint({ ...telemetry, heading });
+    }
+    const route = {
+      ...state.route,
+      remainingCurves: schedule.upcoming,
+      closestIndex: match.index,
+      segmentIndex: match.segmentIndex,
+      progressMeters,
+    };
+    const nextTelemetry = {
+      ...telemetry,
+      heading,
+      offRoute,
+      gpsUsable: canAnnounce,
+      gpsStatus: offRoute ? "Off route" : gpsStatus,
+      routeDistanceMeters: match.distance,
+    };
+    this.#store.update((current) => ({
+      ...current,
+      route,
+      telemetry: nextTelemetry,
+      session,
+    }));
+    this.#audio.prune();
+    this.#map.setUserPosition(telemetry.position, heading || 0, {
+      follow: state.ui.followUser,
+      animate: true,
+    });
+
+    const routeLength = state.route.cumulativeDistances.at(-1) || 0;
+    const reachedEnd =
+      progressMeters >= Math.max(0, routeLength - 35) &&
+      distanceMeters(telemetry.position, state.route.endPoint) <
+        COMPLETE_DISTANCE_METERS;
+    if (!demo && reachedEnd && !this.#routeCompleted) {
+      this.#routeCompleted = true;
+      void this.#stopActiveMode({ completed: true });
+    }
+  }
+
+  #handleTrackingError(error) {
+    const state = this.#store.getState();
+    this.#audio.clear();
+    this.#scheduler.rebase(state.route.curves, state.route.progressMeters);
+    this.#callsPaused = true;
+    this.#store.update((state) => ({
+      ...state,
+      telemetry: {
+        ...state.telemetry,
+        gpsUsable: false,
+        gpsStatus: error.message,
+      },
+    }));
+    this.#view.showToast(`${error.message} Pace notes paused.`, {
+      tone: "error",
+      duration: 3_600,
+    });
+    if (error.fatal) void this.#stopActiveMode();
+  }
+
+  #checkGpsHeartbeat() {
+    const state = this.#store.getState();
+    if (state.mode !== "tracking" || !state.telemetry.gpsUsable) return;
+    const quality = evaluateTelemetryQuality(state.telemetry);
+    if (quality.usable) return;
+
+    this.#audio.clear();
+    this.#scheduler.rebase(state.route.curves, state.route.progressMeters);
+    this.#callsPaused = true;
+    this.#store.update((current) => ({
+      ...current,
+      telemetry: {
+        ...current.telemetry,
+        gpsUsable: false,
+        gpsStatus: quality.reason,
+      },
+    }));
+  }
+
+  #toggleRecording() {
+    const state = this.#store.getState();
+    if (state.mode !== "tracking" && state.mode !== "demo") return;
+    if (this.#recorder.active) {
+      this.#stopRecording();
+      return;
+    }
+
+    this.#recorder.start();
+    this.#store.update((current) => ({
+      ...current,
+      recording: { active: true },
+    }));
+    this.#view.showToast("Recording started.", { tone: "success" });
+  }
+
+  #stopRecording({ notify = true } = {}) {
+    if (!this.#recorder.active) return { saved: false, data: null };
+    const state = this.#store.getState();
+    const data = this.#recorder.stop({ routeName: state.route.name });
+    const saved = this.#recorder.download(data);
+    this.#store.update((current) => ({
+      ...current,
+      recording: { active: false },
+    }));
+
+    if (notify) {
+      this.#view.showToast(
+        saved
+          ? `Download requested · ${data.paceNoteCount} pace notes.`
+          : "Not enough track data to save.",
+        { tone: saved ? "success" : "error" },
+      );
+    }
+    return { saved, data };
+  }
+
+  #centerMap() {
+    this.#store.update((state) => ({
+      ...state,
+      ui: { ...state.ui, followUser: true },
+    }));
+    this.#map.followUser({ animate: true });
+  }
+
+  #toggleSound() {
+    const enabled = !this.#store.getState().soundEnabled;
+    this.#audio.setEnabled(enabled);
+    this.#store.update((state) => ({ ...state, soundEnabled: enabled }));
+    this.#view.showToast(
+      enabled ? "Voice callouts on." : "Voice callouts muted.",
+    );
+  }
+}
+
+function buildRoute(name, result) {
+  const cumulativeDistances = buildCumulativeDistances(result.coordinates);
+  const curves = analyzeCurves(result.coordinates);
+  return {
+    loaded: true,
+    name,
+    coordinates: result.coordinates,
+    cumulativeDistances,
+    distanceMeters: result.distanceMeters,
+    durationSeconds: result.durationSeconds,
+    curves,
+    remainingCurves: curves.map((curve) => ({
+      ...curve,
+      distance: Math.round(curve.distanceFromStart),
+      callState: "pending",
+    })),
+    endPoint: result.coordinates.at(-1),
+    closestIndex: 0,
+    segmentIndex: 0,
+    progressMeters: 0,
+  };
+}
+
+function resetRouteProgress(route) {
+  return {
+    ...route,
+    closestIndex: 0,
+    segmentIndex: 0,
+    progressMeters: 0,
+    remainingCurves: route.curves.map((curve) => ({
+      ...curve,
+      distance: Math.round(curve.distanceFromStart),
+      callState: "pending",
+    })),
+  };
+}

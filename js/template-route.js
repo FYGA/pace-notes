@@ -1,9 +1,9 @@
-export const ROUTE_TEMPLATE=String.raw`<section aria-labelledby="route-title" class="modal-layer is-hidden" id="route-panel">
+export const ROUTE_TEMPLATE = String.raw`<section aria-labelledby="route-title" aria-modal="true" class="modal-layer is-hidden" id="route-panel" role="dialog">
 <div class="modal-card modal-card--route">
 <button aria-label="Close destination setup" class="modal-close" id="close-route-btn" type="button">×</button>
 <div class="modal-kicker">Route</div>
 <h2 id="route-title">Where are you headed?</h2>
-<p class="modal-copy">The full route is calculated once, then analyzed for pace notes before you start.</p>
+<p class="modal-copy">The route creates a geometry-only draft. It cannot see grip, camber, visibility, surface hazards, or road conditions. Review it before use and obey all road laws.</p>
 <form class="destination-form" id="route-form">
 <label class="sr-only" for="destination-input">Destination</label>
 <input autocomplete="street-address" id="destination-input" placeholder="Address, city, or place" required="" type="search"/>
@@ -13,7 +13,7 @@ export const ROUTE_TEMPLATE=String.raw`<section aria-labelledby="route-title" cl
 <div class="route-summary__header">
 <span class="route-ready-mark">✓</span>
 <div>
-<span>Route ready</span>
+<span>Geometry draft ready</span>
 <strong id="route-name">Destination</strong>
 </div>
 </div>
