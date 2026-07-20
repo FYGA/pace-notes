@@ -16,12 +16,14 @@ export const createEmptyRoute = () => ({
 export const createInitialState = ({
   hasSavedToken = false,
   maskedToken = "",
+  preferences = { paceNoteProfile: "numerical" },
 } = {}) => ({
   initialized: false,
   mapReady: false,
   mode: "idle",
   busy: false,
   soundEnabled: true,
+  preferences: { ...preferences },
   wakeLockActive: false,
   hasSavedToken,
   maskedToken,

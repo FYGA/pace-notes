@@ -7,11 +7,14 @@ import {
 export function renderState(s, i) {
   ((s.app.dataset.mode = i.mode),
     s.settingsPanel.classList.toggle("is-hidden", !i.ui.settingsOpen),
+    s.closeSettingsButton.classList.toggle("is-hidden", !i.initialized),
+    setBackgroundInert(s, i.ui.settingsOpen, i.ui.routeOpen),
     s.routePanel.classList.toggle("is-hidden", !i.ui.routeOpen));
   const a = i.hasSavedToken && !i.ui.showTokenInput;
   (s.savedTokenView.classList.toggle("is-hidden", !a),
     s.tokenForm.classList.toggle("is-hidden", a),
     (s.maskedToken.textContent = i.maskedToken),
+    (s.paceNoteProfile.value = i.preferences.paceNoteProfile),
     s.routeSummary.classList.toggle("is-hidden", !i.route.loaded),
     (s.routeName.textContent = i.route.name || "Destination"),
     (s.routeDistance.textContent = i.route.loaded
@@ -32,6 +35,7 @@ export function renderState(s, i) {
         (t.useSavedTokenButton.disabled = e.busy),
         (t.changeTokenButton.disabled = e.busy),
         (t.tokenInput.disabled = e.busy),
+        (t.paceNoteProfile.disabled = e.busy || e.mode !== "idle"),
         (t.loadRouteButton.disabled = e.busy),
         (t.startButton.disabled = !e.route.loaded || e.busy || n),
         t.startButton.classList.toggle("button--primary", !o),
@@ -51,8 +55,9 @@ export function renderState(s, i) {
           : n
             ? "Stop demo"
             : "Demo"),
-        (t.routeButton.disabled = !e.initialized || e.busy),
-        (t.settingsButton.disabled = e.busy),
+        (t.routeButton.disabled =
+          !e.initialized || e.busy || e.mode !== "idle"),
+        (t.settingsButton.disabled = e.busy || e.mode !== "idle"),
         (t.centerButton.disabled = !e.telemetry.position),
         (t.recordButton.disabled = !o && !n),
         t.recordButton.classList.toggle("is-recording", e.recording.active),
@@ -74,32 +79,32 @@ export function renderState(s, i) {
       ((t.callText.className = "pace-call"),
         e.telemetry.offRoute
           ? ((t.distance.textContent = "!"),
-            (t.callText.textContent = "Off route"),
+            setText(t.callText, "Off route"),
             (t.callDescription.textContent =
               "Pace notes paused until the route match is reliable"))
           : n
             ? ((t.distance.textContent = "—"),
-              (t.callText.textContent = "GPS uncertain"),
+              setText(t.callText, "GPS uncertain"),
               (t.callDescription.textContent =
                 e.telemetry.gpsStatus || "Pace notes paused"))
             : o
               ? ((t.distance.textContent = `${Math.max(0, Math.round(o.distance))}m`),
-                (t.callText.textContent = o.call),
+                setText(t.callText, o.call),
                 t.callText.classList.add(`severity-${o.severity}`),
                 (t.callDescription.textContent = `Generated geometry draft · ${o.description}`))
               : e.busy && "loading-route" === e.mode
                 ? ((t.distance.textContent = "…"),
-                  (t.callText.textContent = "Building pace notes"),
+                  setText(t.callText, "Building pace notes"),
                   (t.callDescription.textContent =
                     "Calculating the route and analyzing road geometry"))
                 : e.route.loaded
                   ? ((t.distance.textContent = "—"),
-                    (t.callText.textContent = "Clear road ahead"),
+                    setText(t.callText, "Clear road ahead"),
                     (t.callDescription.textContent = e.telemetry.offRoute
                       ? "You appear to be off the loaded route"
                       : e.route.name))
                   : ((t.distance.textContent = "—"),
-                    (t.callText.textContent = "Load a route to begin"),
+                    setText(t.callText, "Load a route to begin"),
                     (t.callDescription.textContent =
                       "Destination-based rally-style guidance")));
       const upcomingNotes = e.route.remainingCurves.slice(0, 4).map((t) => {
@@ -173,4 +178,22 @@ export function renderState(s, i) {
         e.approachGlow.style.setProperty("--glow-color", t[n.severity]),
         (e.approachGlow.style.opacity = s.toFixed(2)));
     })(s, i));
+}
+
+function setBackgroundInert(elements, settingsOpen, routeOpen) {
+  const activePanel = settingsOpen
+    ? elements.settingsPanel
+    : routeOpen
+      ? elements.routePanel
+      : null;
+  activePanel?.removeAttribute("inert");
+  for (const child of elements.app.children) {
+    if (child !== activePanel) {
+      child.toggleAttribute("inert", Boolean(activePanel));
+    }
+  }
+}
+
+function setText(element, value) {
+  if (element.textContent !== value) element.textContent = value;
 }

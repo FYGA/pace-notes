@@ -258,11 +258,13 @@ function buildCurveGeoJson(curves) {
       geometry: { type: "Point", coordinates: curve.position },
       properties: {
         color: SEVERITY_COLORS[curve.severity],
-        label: curve.isHairpin
-          ? `${curve.direction}H`
-          : curve.isSquare
-            ? `${curve.direction}SQ`
-            : `${curve.direction}${curve.severity}`,
+        label:
+          curve.shortLabel ||
+          (curve.isHairpin
+            ? `${curve.direction}H`
+            : curve.isSquare
+              ? `${curve.direction}SQ`
+              : `${curve.direction}${curve.severity}`),
       },
     })),
   };

@@ -1,7 +1,6 @@
-import { buildCallText } from "./curves.js";
+import { renderCornerCall, renderLinkedCall } from "./pacenotes.js";
 
 const BEEP_LEAD_MS = 180;
-const AND_MAX_GAP_METERS = 50;
 
 export class AudioService {
   #enabled = true;
@@ -217,28 +216,10 @@ export class AudioService {
 }
 
 export function buildAnnouncement(curve, nextCurve = null) {
-  let text = buildCallText(curve);
-  if (curve.caution) text += `, caution ${curve.caution}`;
-
-  if (nextCurve) {
-    const gap = routeDistance(nextCurve) - routeDistance(curve);
-    const connector = buildConnector(gap);
-    text += `, ${connector}, ${buildCallText(nextCurve)}`;
-  }
-
-  return text;
-}
-
-function routeDistance(curve) {
-  if (Number.isFinite(curve?.distance)) return curve.distance;
-  if (Number.isFinite(curve?.distanceFromStart)) return curve.distanceFromStart;
-  return Number.NaN;
-}
-
-function buildConnector(gap) {
-  if (!Number.isFinite(gap)) return "and";
-  if (gap <= AND_MAX_GAP_METERS) return "and";
-  return String(Math.max(10, Math.round(gap / 10) * 10));
+  const profileId = curve?.profileId || "numerical";
+  return nextCurve
+    ? renderLinkedCall(curve, nextCurve, profileId)
+    : renderCornerCall(curve, profileId);
 }
 
 function speechWatchdogMs(text) {

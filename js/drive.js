@@ -97,7 +97,7 @@ export class CallScheduler {
     this.#states = new Map(
       curves.map((curve) => [
         curve.id,
-        curve.distanceFromStart < progressMeters - 8 ? "passed" : "pending",
+        routeDistance(curve) < progressMeters - 8 ? "passed" : "pending",
       ]),
     );
   }
@@ -114,7 +114,7 @@ export class CallScheduler {
     const positioned = curves
       .map((curve) => {
         if (!this.#states.has(curve.id)) this.#states.set(curve.id, "pending");
-        const distance = Math.round(curve.distanceFromStart - progressMeters);
+        const distance = Math.round(routeDistance(curve) - progressMeters);
         if (distance < -8) this.#states.set(curve.id, "passed");
         return { ...curve, distance, callState: this.stateFor(curve.id) };
       })
@@ -127,14 +127,12 @@ export class CallScheduler {
 
     const announcementIndex = positioned.findIndex((curve, index) => {
       const nextCurve = positioned[index + 1];
-      const gap = nextCurve
-        ? nextCurve.distanceFromStart - curve.distanceFromStart
-        : Infinity;
+      const gap = nextCurve ? linkGapMeters(curve, nextCurve) : Infinity;
       const phrase =
         nextCurve?.callState === "pending" &&
-        gap > 0 &&
+        gap >= 0 &&
         gap <= MAX_LINKED_GAP_METERS
-          ? `${curve.call}, and, ${nextCurve.call}`
+          ? curve.linkedCall || `${curve.call}, and, ${nextCurve.call}`
           : curve.call;
       return (
         curve.callState === "pending" &&
@@ -151,11 +149,11 @@ export class CallScheduler {
       announcement.callState = "spoken";
       const nextCurve = positioned[announcementIndex + 1];
       const gap = nextCurve
-        ? nextCurve.distanceFromStart - announcement.distanceFromStart
+        ? linkGapMeters(announcement, nextCurve)
         : Infinity;
       if (
         nextCurve?.callState === "pending" &&
-        gap > 0 &&
+        gap >= 0 &&
         gap <= MAX_LINKED_GAP_METERS
       ) {
         this.markSpoken(nextCurve.id);
@@ -170,4 +168,14 @@ export class CallScheduler {
       linkedCurve,
     };
   }
+}
+
+function routeDistance(curve) {
+  return curve?.entryDistanceMeters ?? curve?.distanceFromStart ?? Infinity;
+}
+
+function linkGapMeters(current, next) {
+  const currentExit =
+    current?.exitDistanceMeters ?? current?.endDistance ?? routeDistance(current);
+  return routeDistance(next) - currentExit;
 }

@@ -86,6 +86,65 @@ test("recorded notes and track points use the same timeMs field", () => {
   }
 });
 
+test("recording schema v3 adds provenance while preserving legacy note fields", () => {
+  const recorder = new Recorder();
+  recorder.start({
+    engineVersion: "geometry-v2",
+    noteSchemaVersion: 2,
+    profileId: "descriptive",
+  });
+  const modifiers = ["long", "tightens"];
+  recorder.addPaceNote(
+    {
+      id: "curve-100-R",
+      position: [1, 2],
+      call: "right open long tightens tight",
+      severity: 4,
+      direction: "R",
+      angle: 80,
+      totalAngle: 81,
+      radiusMeters: 70,
+      startDistance: 100,
+      apexDistance: 135,
+      endDistance: 180,
+      shape: "normal",
+      modifiers,
+      source: "route-geometry",
+      verified: false,
+      profileId: "descriptive",
+    },
+    "right open long tightens tight",
+    { groupId: "group-1", groupIndex: 0 },
+  );
+  modifiers.push("late");
+  const data = recorder.stop({ routeName: "Schema test" });
+  const note = data.paceNotes[0];
+
+  assert.equal(data.schemaVersion, 3);
+  assert.deepEqual(data.paceNoteSystem, {
+    engineVersion: "geometry-v2",
+    noteSchemaVersion: 2,
+    profileId: "descriptive",
+  });
+  for (const legacyKey of [
+    "position",
+    "call",
+    "spoken",
+    "severity",
+    "direction",
+    "angle",
+    "radiusMeters",
+    "caution",
+    "timeMs",
+  ]) {
+    assert.ok(legacyKey in note, `legacy field ${legacyKey} should remain`);
+  }
+  assert.equal(note.noteId, "curve-100-R");
+  assert.equal(note.entryDistanceMeters, 100);
+  assert.equal(note.announcementGroupId, "group-1");
+  assert.deepEqual(note.modifiers, ["long", "tightens"]);
+});
+
 test("wake-lock requests are shared and release the matching sentinel", async () => {
   let requestCount = 0;
   const listeners = new Map();

@@ -1,5 +1,6 @@
 export const SETTINGS_TEMPLATE = String.raw`<section aria-labelledby="settings-title" aria-modal="true" class="modal-layer" id="settings-panel" role="dialog">
 <div class="modal-card">
+<button aria-label="Close settings" class="modal-close is-hidden" id="close-settings-btn" type="button">×</button>
 <div class="modal-kicker">Setup</div>
 <h1 id="settings-title">Connect Mapbox</h1>
 <p class="modal-copy">Your public Mapbox token stays in this browser and is used for maps, search, and directions.</p>
@@ -11,10 +12,18 @@ export const SETTINGS_TEMPLATE = String.raw`<section aria-labelledby="settings-t
 </div>
 <form class="form-stack" id="token-form">
 <label for="token-input">Public access token</label>
-<input autocomplete="off" id="token-input" inputmode="text" placeholder="pk.eyJ1..." required="" spellcheck="false" type="text"/>
+<input autocomplete="off" autofocus="" id="token-input" inputmode="text" placeholder="pk.eyJ1..." required="" spellcheck="false" type="text"/>
 <button class="button button--primary button--full" id="connect-map-btn" type="submit">Open Pace Notes</button>
 </form>
 <a class="help-link" href="https://account.mapbox.com/access-tokens/" rel="noreferrer" target="_blank">Create a free Mapbox token ↗</a>
+<div class="preference-control">
+<label for="pace-note-profile">Pace-note language</label>
+<select id="pace-note-profile">
+<option value="numerical">Numerical · 1 tightest → 6 gentlest</option>
+<option value="descriptive">Descriptive · Left open</option>
+</select>
+<p>The numerical scale runs 1 tightest to 6 gentlest. Wording changes only; detected geometry stays the same.</p>
+</div>
 <p class="safety-note">Generated notes are unverified geometry drafts, not safe-speed or hazard advice. Use competition notes only on controlled stages. On public roads, obey every law, drive to visible conditions, and never interact with the screen while moving.</p>
 </div>
 </section>`;

@@ -179,6 +179,67 @@ test("linked corners are scheduled atomically and cannot announce twice", () => 
   assert.equal(second.announcement, null);
 });
 
+test("scheduler uses canonical entry distance and the exact linked phrase", () => {
+  const scheduler = new CallScheduler();
+  const canonical = [
+    {
+      id: "canonical-one",
+      entryDistanceMeters: 100,
+      severity: 4,
+      call: "left open",
+      linkedCall: "left open, 70, right tight",
+    },
+    {
+      id: "canonical-two",
+      entryDistanceMeters: 170,
+      severity: 2,
+      call: "right tight",
+    },
+  ];
+  scheduler.reset(canonical);
+
+  const result = scheduler.update({
+    curves: canonical,
+    progressMeters: 55,
+    speedMph: 30,
+    canAnnounce: true,
+  });
+
+  assert.equal(result.announcement?.id, "canonical-one");
+  assert.equal(result.linkedCurve?.id, "canonical-two");
+});
+
+test("link eligibility uses the straight gap after the first corner exits", () => {
+  const scheduler = new CallScheduler();
+  const canonical = [
+    {
+      id: "long-corner",
+      entryDistanceMeters: 100,
+      exitDistanceMeters: 400,
+      severity: 4,
+      call: "left 4 long",
+      linkedCall: "left 4 long, and, right 3",
+    },
+    {
+      id: "after-long-corner",
+      entryDistanceMeters: 450,
+      exitDistanceMeters: 500,
+      severity: 3,
+      call: "right 3",
+    },
+  ];
+  scheduler.reset(canonical);
+  const result = scheduler.update({
+    curves: canonical,
+    progressMeters: 50,
+    speedMph: 50,
+    canAnnounce: true,
+  });
+
+  assert.equal(result.announcement?.id, "long-corner");
+  assert.equal(result.linkedCurve?.id, "after-long-corner");
+});
+
 test("rebasing after a pause restores only notes still ahead", () => {
   const scheduler = new CallScheduler();
   scheduler.reset(curves);

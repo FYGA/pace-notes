@@ -8,10 +8,17 @@ import {
   isRouteHeadingCompatible,
 } from "./drive.js";
 import { MapController } from "./map.js";
+import { renderCornerCall, renderLinkedCall } from "./pacenotes.js";
 import { Recorder } from "./recording.js";
 import { MapboxClient } from "./routing.js";
 import { SessionTracker, WakeLockService } from "./session.js";
-import { loadMapboxToken, maskToken, saveMapboxToken } from "./settings.js";
+import {
+  loadMapboxToken,
+  loadPreferences,
+  maskToken,
+  saveMapboxToken,
+  savePreferences,
+} from "./settings.js";
 import { createInitialState, Store } from "./state.js";
 import { PositionTracker } from "./tracking.js";
 import { AppView } from "./ui.js";
@@ -52,10 +59,12 @@ export class PaceNotesApp {
 
   constructor() {
     this.#token = loadMapboxToken();
+    const preferences = loadPreferences();
     this.#store = new Store(
       createInitialState({
         hasSavedToken: Boolean(this.#token),
         maskedToken: maskToken(this.#token),
+        preferences,
       }),
     );
     this.#view = new AppView(document);
@@ -76,6 +85,8 @@ export class PaceNotesApp {
       onSaveToken: (token) => this.#saveToken(token),
       onUseSavedToken: () => this.#saveToken(this.#token),
       onChangeToken: () => this.#changeToken(),
+      onChangePaceNoteProfile: (profile) =>
+        this.#changePaceNoteProfile(profile),
       onLoadRoute: (destination) => this.#loadRoute(destination),
       onCloseRoute: () => this.#closeRoute(),
       onStartDriving: () => this.#startTracking(),
@@ -86,8 +97,10 @@ export class PaceNotesApp {
       onCenterMap: () => this.#centerMap(),
       onToggleSound: () => this.#toggleSound(),
       onOpenSettings: () => this.#openSettings(),
+      onCloseSettings: () => this.#closeSettings(),
       onUserGesture: () => this.#audio.unlock(),
     });
+    if (this.#store.getState().ui.settingsOpen) this.#view.focusSettings();
 
     this.#sessionTimer = setInterval(() => {
       if (!this.#session.active) return;
@@ -160,6 +173,31 @@ export class PaceNotesApp {
     this.#view.clearTokenInput();
   }
 
+  #changePaceNoteProfile(profile) {
+    const state = this.#store.getState();
+    if (state.busy || state.mode !== "idle") return;
+
+    const preferences = savePreferences({ paceNoteProfile: profile });
+    const route = state.route.loaded
+      ? rematerializeRoute(state.route, preferences.paceNoteProfile)
+      : state.route;
+    if (route.loaded) {
+      this.#scheduler.reset(route.curves);
+      this.#map.setRoute(route);
+    }
+    this.#store.update((current) => ({
+      ...current,
+      preferences,
+      route,
+    }));
+    this.#view.showToast(
+      preferences.paceNoteProfile === "descriptive"
+        ? "Descriptive pace-note wording selected."
+        : "Numerical pace-note wording selected.",
+      { tone: "success" },
+    );
+  }
+
   async #loadRoute(destination) {
     if (!destination) {
       this.#view.showToast("Enter a destination.", { tone: "error" });
@@ -196,7 +234,11 @@ export class PaceNotesApp {
       }
 
       if (this.#routeAbortController !== controller) return;
-      const route = buildRoute(destinationResult.name, result);
+      const route = buildRoute(
+        destinationResult.name,
+        result,
+        this.#store.getState().preferences.paceNoteProfile,
+      );
       this.#scheduler.reset(route.curves);
       this.#map.setRoute(route);
       this.#offRouteLatched = false;
@@ -247,10 +289,15 @@ export class PaceNotesApp {
       ...state,
       ui: { ...state.ui, routeOpen: false },
     }));
+    this.#view.focusRouteButton();
   }
 
-  async #openSettings() {
-    await this.#stopActiveMode();
+  #openSettings() {
+    const state = this.#store.getState();
+    if (state.busy || state.mode !== "idle") {
+      this.#view.showToast("Settings are available after the drive stops.");
+      return;
+    }
     this.#store.update((state) => ({
       ...state,
       ui: {
@@ -260,6 +307,16 @@ export class PaceNotesApp {
         showTokenInput: !state.hasSavedToken,
       },
     }));
+    this.#view.focusSettings();
+  }
+
+  #closeSettings() {
+    if (!this.#store.getState().initialized) return;
+    this.#store.update((state) => ({
+      ...state,
+      ui: { ...state.ui, settingsOpen: false },
+    }));
+    this.#view.focusSettingsButton();
   }
 
   #toggleTracking() {
@@ -369,7 +426,11 @@ export class PaceNotesApp {
         throw new Error("Demo route could not be loaded.");
       }
 
-      const route = buildRoute(DEMO_ROUTE.name, result);
+      const route = buildRoute(
+        DEMO_ROUTE.name,
+        result,
+        this.#store.getState().preferences.paceNoteProfile,
+      );
       this.#map.setRoute(route);
       this.#session.start();
       this.#scheduler.reset(route.curves);
@@ -675,9 +736,16 @@ export class PaceNotesApp {
           },
         },
       );
-      this.#recorder.addPaceNote(announcement, spokenText);
+      const announcementGroupId = `${announcement.id}-${Date.now()}`;
+      this.#recorder.addPaceNote(announcement, spokenText, {
+        groupId: announcementGroupId,
+        groupIndex: 0,
+      });
       if (schedule.linkedCurve) {
-        this.#recorder.addPaceNote(schedule.linkedCurve, spokenText);
+        this.#recorder.addPaceNote(schedule.linkedCurve, spokenText, {
+          groupId: announcementGroupId,
+          groupIndex: 1,
+        });
       }
       this.#view.flashCall();
     }
@@ -770,7 +838,11 @@ export class PaceNotesApp {
       return;
     }
 
-    this.#recorder.start();
+    this.#recorder.start({
+      engineVersion: state.route.engineVersion,
+      noteSchemaVersion: state.route.noteSchemaVersion,
+      profileId: state.route.profileId,
+    });
     this.#store.update((current) => ({
       ...current,
       recording: { active: true },
@@ -817,9 +889,9 @@ export class PaceNotesApp {
   }
 }
 
-function buildRoute(name, result) {
+export function buildRoute(name, result, profileId = "numerical") {
   const cumulativeDistances = buildCumulativeDistances(result.coordinates);
-  const curves = analyzeCurves(result.coordinates);
+  const curves = materializeCurves(analyzeCurves(result.coordinates), profileId);
   return {
     loaded: true,
     name,
@@ -828,6 +900,9 @@ function buildRoute(name, result) {
     distanceMeters: result.distanceMeters,
     durationSeconds: result.durationSeconds,
     curves,
+    engineVersion: "geometry-v2",
+    noteSchemaVersion: 2,
+    profileId,
     remainingCurves: curves.map((curve) => ({
       ...curve,
       distance: Math.round(curve.distanceFromStart),
@@ -837,6 +912,72 @@ function buildRoute(name, result) {
     closestIndex: 0,
     segmentIndex: 0,
     progressMeters: 0,
+  };
+}
+
+export function materializeCurves(curves, profileId) {
+  const facts = curves.map((curve) => {
+    const enriched = {
+      ...curve,
+      schemaVersion: 2,
+      engineVersion: "geometry-v2",
+      source: "route-geometry",
+      verified: false,
+      entryDistanceMeters: curve.startDistance,
+      apexDistanceMeters: curve.apexDistance,
+      exitDistanceMeters: curve.endDistance,
+      profileId,
+    };
+    const shortLabel = renderCornerCall(
+      { ...enriched, modifiers: [], manualAnnotations: [], annotations: [] },
+      profileId,
+    )
+      .replace(/^left /, "L ")
+      .replace(/^right /, "R ");
+    return {
+      ...enriched,
+      call: renderCornerCall(enriched, profileId),
+      shortLabel,
+    };
+  });
+
+  return facts.map((curve, index) => {
+    const nextCurve = facts[index + 1];
+    if (!nextCurve) return { ...curve, linkedCall: curve.call };
+
+    const gapMeters = Math.max(
+      0,
+      nextCurve.entryDistanceMeters - curve.exitDistanceMeters,
+    );
+    const connectionToNext =
+      gapMeters <= 50
+        ? { kind: "and", meters: gapMeters }
+        : { kind: "distance", meters: gapMeters };
+    return {
+      ...curve,
+      connectionToNext,
+      linkedCall: renderLinkedCall(
+        curve,
+        nextCurve,
+        profileId,
+        connectionToNext,
+      ),
+    };
+  });
+}
+
+function rematerializeRoute(route, profileId) {
+  const curves = materializeCurves(route.curves, profileId);
+  const curvesById = new Map(curves.map((curve) => [curve.id, curve]));
+  return {
+    ...route,
+    profileId,
+    curves,
+    remainingCurves: route.remainingCurves.map((curve) => ({
+      ...(curvesById.get(curve.id) || curve),
+      distance: curve.distance,
+      callState: curve.callState,
+    })),
   };
 }
 
