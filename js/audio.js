@@ -1,117 +1,99 @@
-// ============================
-// Audio - Speech synthesis, beep tones, haptics, iOS unlock
-// ============================
+import { buildCallText } from './curves.js';
 
-// Initialize Web Audio API
-function initAudio() {
-  if (!audioCtx) {
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (audioCtx.state === 'suspended') {
-    audioCtx.resume();
-  }
-}
+export class AudioService {
+  #enabled = true;
+  #audioContext = null;
+  #unlocked = false;
 
-// Play a short beep before voice callouts
-function playBeep(severity) {
-  if (!audioCtx || !soundEnabled) return;
-  try {
-    const osc = audioCtx.createOscillator();
-    const gain = audioCtx.createGain();
-    osc.connect(gain);
-    gain.connect(audioCtx.destination);
-
-    // Higher pitch for tighter curves (more urgent)
-    const freq = severity <= 2 ? 880 : severity <= 4 ? 660 : 520;
-    osc.frequency.value = freq;
-    osc.type = 'sine';
-
-    gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
-
-    osc.start(audioCtx.currentTime);
-    osc.stop(audioCtx.currentTime + 0.15);
-  } catch (e) {
-    // Audio context issues are non-critical
-  }
-}
-
-// Haptic feedback via vibration API
-function triggerHaptic(severity) {
-  if (!navigator.vibrate) return;
-  if (severity <= 1) {
-    navigator.vibrate([100, 50, 100, 50, 100]); // triple pulse for hairpin
-  } else if (severity <= 2) {
-    navigator.vibrate([100, 50, 100]); // double pulse for tight
-  } else if (severity <= 3) {
-    navigator.vibrate(80); // single pulse for medium
-  } else if (severity <= 5) {
-    navigator.vibrate(40); // light tap for open curves
-  }
-}
-
-// Speak curve callout - Rally style with inter-curve distance
-function speakCurve(curve) {
-  if (!('speechSynthesis' in window)) return;
-
-  // Pre-callout beep and haptics
-  playBeep(curve.severity);
-  triggerHaptic(curve.severity);
-
-  // Flash the callout text
-  callTextEl.classList.add('flash');
-  setTimeout(() => callTextEl.classList.remove('flash'), 200);
-
-  window.speechSynthesis.cancel();
-
-  let text = buildCallText(curve);
-
-  // Add caution modifier if present
-  if (curve.caution) {
-    text += `, caution ${curve.caution}`;
+  get enabled() {
+    return this.#enabled;
   }
 
-  // Add distance to next curve if it's within 200m (rally style linkage)
-  const curveIdx = upcomingCurves.indexOf(curve);
-  if (curveIdx >= 0 && curveIdx < upcomingCurves.length - 1) {
-    const nextCurve = upcomingCurves[curveIdx + 1];
-    const gapDistance = nextCurve.distance - curve.distance;
-    if (gapDistance > 20 && gapDistance <= 200) {
-      const roundedGap = Math.round(gapDistance / 10) * 10;
-      text += `, ${roundedGap}, ${buildCallText(nextCurve)}`;
+  setEnabled(enabled) {
+    this.#enabled = Boolean(enabled);
+    if (!this.#enabled) globalThis.speechSynthesis?.cancel();
+  }
+
+  async unlock() {
+    if (!this.#audioContext && (globalThis.AudioContext || globalThis.webkitAudioContext)) {
+      const AudioContextClass = globalThis.AudioContext || globalThis.webkitAudioContext;
+      this.#audioContext = new AudioContextClass();
+    }
+
+    if (this.#audioContext?.state === 'suspended') {
+      try {
+        await this.#audioContext.resume();
+      } catch {
+        // Audio feedback is optional.
+      }
+    }
+
+    if (!this.#unlocked && 'speechSynthesis' in globalThis) {
+      const utterance = new SpeechSynthesisUtterance('');
+      utterance.volume = 0;
+      globalThis.speechSynthesis.speak(utterance);
+      this.#unlocked = true;
     }
   }
 
-  // Record the pace note if recording
-  recordPaceNote(curve, text);
+  announce(curve, nextCurve = null) {
+    const text = buildAnnouncement(curve, nextCurve);
+    if (!this.#enabled) return text;
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.3;
-  utterance.pitch = 1.0;
-  utterance.volume = 1.0;
+    this.#beep(curve.severity);
+    this.#vibrate(curve.severity);
 
-  window.speechSynthesis.speak(utterance);
-}
+    if ('speechSynthesis' in globalThis) {
+      globalThis.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.28;
+      utterance.pitch = 1;
+      utterance.volume = 1;
+      globalThis.speechSynthesis.speak(utterance);
+    }
 
-// Toggle sound on/off
-function toggleSound() {
-  soundEnabled = !soundEnabled;
-  soundBtn.textContent = soundEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07';
-  soundBtn.classList.toggle('muted', !soundEnabled);
+    return text;
+  }
 
-  if (!soundEnabled) {
-    window.speechSynthesis?.cancel();
+  #beep(severity) {
+    if (!this.#audioContext) return;
+
+    try {
+      const oscillator = this.#audioContext.createOscillator();
+      const gain = this.#audioContext.createGain();
+      oscillator.connect(gain);
+      gain.connect(this.#audioContext.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.value = severity <= 2 ? 880 : severity <= 4 ? 660 : 520;
+      gain.gain.setValueAtTime(0.26, this.#audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, this.#audioContext.currentTime + 0.15);
+      oscillator.start();
+      oscillator.stop(this.#audioContext.currentTime + 0.15);
+    } catch {
+      // Audio feedback is optional.
+    }
+  }
+
+  #vibrate(severity) {
+    if (!navigator.vibrate) return;
+    if (severity <= 1) navigator.vibrate([100, 50, 100, 50, 100]);
+    else if (severity <= 2) navigator.vibrate([100, 50, 100]);
+    else if (severity <= 3) navigator.vibrate(80);
+    else if (severity <= 5) navigator.vibrate(40);
   }
 }
 
-// Unlock speechSynthesis and audio on iOS (requires user gesture)
-function unlockSpeech() {
-  if (!speechUnlocked && 'speechSynthesis' in window) {
-    const utterance = new SpeechSynthesisUtterance('');
-    utterance.volume = 0;
-    window.speechSynthesis.speak(utterance);
-    speechUnlocked = true;
+export function buildAnnouncement(curve, nextCurve = null) {
+  let text = buildCallText(curve);
+  if (curve.caution) text += `, caution ${curve.caution}`;
+
+  if (nextCurve) {
+    const gap = nextCurve.distance - curve.distance;
+    if (gap > 20 && gap <= 200) {
+      text += `, ${Math.round(gap / 10) * 10}, ${buildCallText(nextCurve)}`;
+    }
   }
-  // Also init Web Audio on first tap
-  initAudio();
+
+  return text;
 }

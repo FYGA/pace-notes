@@ -1,69 +1,96 @@
-// ============================
-// Session - Stats tracking, wake lock
-// ============================
+import { distanceMeters } from './utils.js';
 
-function startSession() {
-  sessionStartTime = Date.now();
-  sessionDistance = 0;
-  sessionTopSpeed = 0;
-  sessionTurnsPassed = 0;
-  lastSessionPosition = null;
-  document.getElementById('session-stats').classList.add('visible');
-  updateSessionDisplay();
-}
+const METERS_TO_MILES = 0.000621371;
 
-function stopSession() {
-  document.getElementById('session-stats').classList.remove('visible');
-}
+export class SessionTracker {
+  #startedAt = null;
+  #distanceMiles = 0;
+  #topSpeedMph = 0;
+  #turns = 0;
+  #lastPosition = null;
 
-function updateSessionStats() {
-  if (!sessionStartTime || !currentPosition) return;
-
-  // Accumulate distance
-  if (lastSessionPosition) {
-    const segDist = getDistance(lastSessionPosition, currentPosition); // km
-    sessionDistance += segDist * 0.621371; // to miles
-  }
-  lastSessionPosition = [...currentPosition];
-
-  // Track top speed
-  if (currentSpeed > sessionTopSpeed) {
-    sessionTopSpeed = currentSpeed;
+  get active() {
+    return this.#startedAt !== null;
   }
 
-  updateSessionDisplay();
-}
+  start() {
+    this.#startedAt = Date.now();
+    this.#distanceMiles = 0;
+    this.#topSpeedMph = 0;
+    this.#turns = 0;
+    this.#lastPosition = null;
+  }
 
-function updateSessionDisplay() {
-  if (!sessionStartTime) return;
-  const elapsed = Date.now() - sessionStartTime;
-  const mins = Math.floor(elapsed / 60000);
-  const secs = Math.floor((elapsed % 60000) / 1000);
+  stop() {
+    const snapshot = this.snapshot();
+    this.#startedAt = null;
+    this.#lastPosition = null;
+    return snapshot;
+  }
 
-  document.getElementById('session-dist').textContent = `${sessionDistance.toFixed(1)} mi`;
-  document.getElementById('session-time').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
-  document.getElementById('session-turns').textContent = sessionTurnsPassed;
-  document.getElementById('session-top').textContent = `${sessionTopSpeed} mph`;
-}
+  update(position, speedMph) {
+    if (!this.active || !position) return this.snapshot();
 
-// === SCREEN WAKE LOCK ===
-async function requestWakeLock() {
-  try {
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      document.getElementById('wake-lock-indicator').classList.add('active');
-      wakeLock.addEventListener('release', () => {
-        document.getElementById('wake-lock-indicator').classList.remove('active');
-      });
+    if (this.#lastPosition) {
+      const segmentMeters = distanceMeters(this.#lastPosition, position);
+      if (segmentMeters >= 0.5 && segmentMeters <= 120) {
+        this.#distanceMiles += segmentMeters * METERS_TO_MILES;
+      }
     }
-  } catch (err) {
-    console.log('Wake lock failed:', err);
+
+    this.#lastPosition = [...position];
+    this.#topSpeedMph = Math.max(this.#topSpeedMph, Number(speedMph) || 0);
+    return this.snapshot();
+  }
+
+  incrementTurns() {
+    if (this.active) this.#turns += 1;
+    return this.snapshot();
+  }
+
+  snapshot() {
+    return {
+      active: this.active,
+      distanceMiles: this.#distanceMiles,
+      elapsedMs: this.active ? Date.now() - this.#startedAt : 0,
+      turns: this.#turns,
+      topSpeedMph: this.#topSpeedMph,
+    };
   }
 }
 
-function releaseWakeLock() {
-  if (wakeLock) {
-    wakeLock.release();
-    wakeLock = null;
+export class WakeLockService {
+  #sentinel = null;
+  #onChange = null;
+
+  constructor(onChange = () => {}) {
+    this.#onChange = onChange;
+  }
+
+  async request() {
+    if (!('wakeLock' in navigator)) return false;
+
+    try {
+      this.#sentinel = await navigator.wakeLock.request('screen');
+      this.#onChange(true);
+      this.#sentinel.addEventListener('release', () => {
+        this.#sentinel = null;
+        this.#onChange(false);
+      });
+      return true;
+    } catch {
+      this.#onChange(false);
+      return false;
+    }
+  }
+
+  async release() {
+    if (!this.#sentinel) return;
+    try {
+      await this.#sentinel.release();
+    } finally {
+      this.#sentinel = null;
+      this.#onChange(false);
+    }
   }
 }

@@ -1,85 +1,76 @@
-// ============================
-// Recording - Route recording and JSON export
-// ============================
+export class Recorder {
+  #active = false;
+  #startedAt = null;
+  #track = [];
+  #notes = [];
 
-// Toggle route recording
-function toggleRecording() {
-  if (isRecording) {
-    stopRecording();
-  } else {
-    startRecording();
-  }
-}
-
-function startRecording() {
-  isRecording = true;
-  recordedTrack = [];
-  recordedNotes = [];
-  recordingStartTime = Date.now();
-  const btn = document.getElementById('record-btn');
-  btn.classList.add('recording');
-  showStatus('Recording started');
-  setTimeout(hideStatus, 1500);
-}
-
-function stopRecording() {
-  isRecording = false;
-  const btn = document.getElementById('record-btn');
-  btn.classList.remove('recording');
-
-  if (recordedTrack.length < 2) {
-    showStatus('Not enough data to save');
-    setTimeout(hideStatus, 1500);
-    return;
+  get active() {
+    return this.#active;
   }
 
-  // Build exportable pace notes document
-  const routeData = {
-    name: `Route ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`,
-    date: new Date().toISOString(),
-    duration: Date.now() - recordingStartTime,
-    trackPoints: recordedTrack.length,
-    track: recordedTrack,
-    paceNotes: recordedNotes
-  };
+  start() {
+    this.#active = true;
+    this.#startedAt = Date.now();
+    this.#track = [];
+    this.#notes = [];
+  }
 
-  // Download as JSON
-  const blob = new Blob([JSON.stringify(routeData, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `pace-notes-${Date.now()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  addTrackPoint({ position, speedMph, heading, accuracyMeters }) {
+    if (!this.#active || !position) return;
+    this.#track.push({
+      position: [...position],
+      speedMph,
+      heading,
+      accuracyMeters,
+      timeMs: Date.now() - this.#startedAt,
+    });
+  }
 
-  showStatus(`Saved ${recordedNotes.length} pace notes`);
-  setTimeout(hideStatus, 2000);
-}
+  addPaceNote(curve, spokenText) {
+    if (!this.#active) return;
+    this.#notes.push({
+      position: [...curve.position],
+      call: curve.call,
+      spoken: spokenText,
+      severity: curve.severity,
+      direction: curve.direction,
+      angle: curve.angle,
+      radiusMeters: curve.radiusMeters,
+      caution: curve.caution || null,
+      timeMds: Date.now() - this.#startedAt,
+    });
+  }
 
-// Record a GPS point (called from handlePosition)
-function recordTrackPoint() {
-  if (!isRecording || !currentPosition) return;
-  recordedTrack.push({
-    position: [...currentPosition],
-    speed: currentSpeed,
-    heading: currentHeading,
-    time: Date.now() - recordingStartTime
-  });
-}
+  stop({ routeName = 'Route' } = {}) {
+    if (!this.#active) return null;
 
-// Record a pace note (called when a curve is spoken)
-function recordPaceNote(curve, spokenText) {
-  if (!isRecording) return;
-  recordedNotes.push({
-    position: [...curve.position],
-    call: curve.call,
-    spoken: spokenText,
-    severity: curve.severity,
-    direction: curve.direction,
-    angle: curve.angle,
-    caution: curve.caution || null,
-    time: Date.now() - recordingStartTime
-  });
+    this.#active = false;
+    const exportData = {
+      schemaVersion: 2,
+      name: `${routeName} · ${new Date().toLocaleString()}`,
+      createdAt: new Date().toISOString(),
+      durationMs: Date.now() - this.#startedAt,
+      trackPoints: this.#track.length,
+      paceNoteCount: this.#notes.length,
+      track: this.#track,
+      paceNotes: this.#notes,
+    };
+
+    return exportData;
+  }
+
+  download(data) {
+    if (!data || data.trackPoints < 2) return false;
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `pace-notes-${Date.now()}.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    return true;
+  }
 }

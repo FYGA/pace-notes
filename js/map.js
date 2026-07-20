@@ -1,263 +1,262 @@
-// ============================
-// Map - Mapbox initialization, route rendering, markers
-// ============================
+import { indexAtDistance, pointAhead } from './utils.js';
+import { SEVERITY_COLORS } from './curves.js';
 
-// Initialize Mapbox
-function initMap() {
-  mapboxgl.accessToken = mapboxToken;
+const SOURCE_IDS = Object.freeze({
+  route: 'pace-route',
+  curves: 'pace-curves',
+  brakes: 'pace-brakes',
+});
 
-  map = new mapboxgl.Map({
-    container: 'map',
-    style: 'mapbox://styles/mapbox/navigation-night-v1',
-    center: [0, 0],
-    zoom: 17,
-    pitch: 70,
-    bearing: 0
-  });
+export class MapController {
+  #map = null;
+  #userMarker = null;
+  #ready = false;
+  #lastPosition = null;
+  #lastHeading = 0;
 
-  map.addControl(new mapboxgl.NavigationControl(), 'top-left');
+  async initialize(token) {
+    if (!globalThis.mapboxgl) throw new Error('Mapbox GL failed to load.');
+    mapboxgl.accessToken = token;
 
-  map.on('load', () => {
-    // Add route line source
-    map.addSource('route', {
-      type: 'geojson',
-      data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } }
+    this.#map = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/navigation-night-v1',
+      center: [-121.06, 39.22],
+      zoom: 10,
+      pitch: 52,
+      bearing: 0,
+      attributionControl: false,
     });
 
-    map.addLayer({
-      id: 'route-line',
+    this.#map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-left');
+    this.#map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right');
+
+    await new Promise((resolve, reject) => {
+      this.#map.once('load', resolve);
+      this.#map.once('error', (event) => reject(event.error || new Error('Map failed to load.')));
+    });
+
+    this.#addSourcesAndLayers();
+    this.#ready = true;
+  }
+
+  get ready() {
+    return this.#ready;
+  }
+
+  setRoute(route) {
+    if (!this.#ready || !route?.coordinates?.length) return;
+
+    this.#source(SOURCE_IDS.route)?.setData(buildRouteGeoJson(route));
+    this.#source(SOURCE_IDS.curves)?.setData(buildCurveGeoJson(route.curves));
+    this.#source(SOURCE_IDS.brakes)?.setData(buildBrakeGeoJson(route));
+    this.fitRoute(route.coordinates);
+  }
+
+  clearRoute() {
+    if (!this.#ready) return;
+    this.#source(SOURCE_IDS.route)?.setData(emptyFeatureCollection());
+    this.#source(SOURCE_IDS.curves)?.setData(emptyFeatureCollection());
+    this.#source(SOURCE_IDS.brakes)?.setData(emptyFeatureCollection());
+  }
+
+  setUserPosition(position, heading = 0, { follow = false, animate = true } = {}) {
+    if (!this.#ready || !position) return;
+
+    this.#lastPosition = position;
+    this.#lastHeading = Number.isFinite(heading) ? heading : this.#lastHeading;
+
+    if (!this.#userMarker) {
+      const element = document.createElement('div');
+      element.className = 'user-marker';
+      element.innerHTML = `
+        <svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true">
+          <circle cx="21" cy="21" r="18" fill="#4f8cff" stroke="#ffffff" stroke-width="3"/>
+          <path d="M21 7.5 28 30 21 26.2 14 30Z" fill="#ffffff"/>
+        </svg>`;
+
+      this.#userMarker = new mapboxgl.Marker({
+        element,
+        rotationAlignment: 'map',
+        pitchAlignment: 'map',
+      }).setLngLat(position).addTo(this.#map);
+    } else {
+      this.#userMarker.setLngLat(position).setRotation(this.#lastHeading);
+    }
+
+    if (follow) this.followUser({ animate });
+  }
+
+  followUser({ animate = true } = {}) {
+    if (!this.#ready || !this.#lastPosition) return;
+
+    const center = pointAhead(this.#lastPosition, this.#lastHeading || 0, 0.13);
+    const options = {
+      center,
+      zoom: Math.max(this.#map.getZoom(), 16.5),
+      pitch: 68,
+      bearing: this.#lastHeading || this.#map.getBearing(),
+      duration: animate ? 420 : 0,
+      essential: true,
+    };
+
+    this.#map.easeTo(options);
+  }
+
+  fitRoute(coordinates) {
+    if (!this.#ready || coordinates.length < 2) return;
+    const bounds = coordinates.reduce(
+      (accumulator, coordinate) => accumulator.extend(coordinate),
+      new mapboxgl.LngLatBounds(coordinates[0], coordinates[0]),
+    );
+
+    this.#map.fitBounds(bounds, {
+      padding: { top: 220, right: 54, bottom: 230, left: 54 },
+      maxZoom: 15,
+      pitch: 24,
+      bearing: 0,
+      duration: 650,
+    });
+  }
+
+  #source(id) {
+    return this.#map?.getSource(id);
+  }
+
+  #addSourcesAndLayers() {
+    this.#map.addSource(SOURCE_IDS.route, { type: 'geojson', data: emptyFeatureCollection() });
+    this.#map.addLayer({
+      id: 'pace-route-shadow',
       type: 'line',
-      source: 'route',
+      source: SOURCE_IDS.route,
       paint: {
-        'line-color': ['coalesce', ['get', 'color'], '#3b82f6'],
+        'line-color': '#020409',
+        'line-width': 10,
+        'line-opacity': 0.55,
+      },
+    });
+    this.#map.addLayer({
+      id: 'pace-route-line',
+      type: 'line',
+      source: SOURCE_IDS.route,
+      paint: {
+        'line-color': ['coalesce', ['get', 'color'], '#4f8cff'],
         'line-width': 6,
-        'line-opacity': 0.8
-      }
+        'line-opacity': 0.94,
+      },
     });
 
-    // Add curve markers source
-    map.addSource('curves', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    });
-
-    map.addLayer({
-      id: 'curve-points',
+    this.#map.addSource(SOURCE_IDS.curves, { type: 'geojson', data: emptyFeatureCollection() });
+    this.#map.addLayer({
+      id: 'pace-curve-points',
       type: 'circle',
-      source: 'curves',
+      source: SOURCE_IDS.curves,
       paint: {
-        'circle-radius': 12,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 5, 16, 10],
         'circle-color': ['get', 'color'],
-        'circle-stroke-width': 3,
-        'circle-stroke-color': '#fff'
-      }
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff',
+      },
     });
-
-    map.addLayer({
-      id: 'curve-labels',
+    this.#map.addLayer({
+      id: 'pace-curve-labels',
       type: 'symbol',
-      source: 'curves',
+      source: SOURCE_IDS.curves,
+      minzoom: 12,
       layout: {
         'text-field': ['get', 'label'],
-        'text-size': 12,
-        'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold']
-      },
-      paint: {
-        'text-color': '#fff'
-      }
-    });
-
-    // Add brake point markers
-    map.addSource('brakepoints', {
-      type: 'geojson',
-      data: { type: 'FeatureCollection', features: [] }
-    });
-
-    map.addLayer({
-      id: 'brakepoint-markers',
-      type: 'circle',
-      source: 'brakepoints',
-      paint: {
-        'circle-radius': 6,
-        'circle-color': '#ef4444',
-        'circle-stroke-width': 2,
-        'circle-stroke-color': '#fca5a5',
-        'circle-opacity': 0.8
-      }
-    });
-
-    map.addLayer({
-      id: 'brakepoint-labels',
-      type: 'symbol',
-      source: 'brakepoints',
-      layout: {
-        'text-field': 'B',
-        'text-size': 9,
+        'text-size': 11,
         'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
-        'text-offset': [0, -1.5]
+        'text-allow-overlap': true,
       },
       paint: {
-        'text-color': '#fca5a5'
-      }
+        'text-color': '#ffffff',
+      },
     });
 
-    legend.classList.add('visible');
-    showStatus('Tap Start to begin tracking');
-  });
-}
-
-// Update user marker on map
-function updateUserMarker(coords, heading) {
-  if (!userMarker) {
-    const el = document.createElement('div');
-    el.innerHTML = `
-      <svg width="40" height="40" viewBox="0 0 40 40">
-        <circle cx="20" cy="20" r="18" fill="#3b82f6" stroke="white" stroke-width="3"/>
-        <path d="M20 8 L26 28 L20 24 L14 28 Z" fill="white"/>
-      </svg>
-    `;
-    el.style.width = '40px';
-    el.style.height = '40px';
-    userMarker = new mapboxgl.Marker({ element: el, rotationAlignment: 'map' })
-      .setLngLat(coords)
-      .addTo(map);
-  } else {
-    userMarker.setLngLat(coords);
-    userMarker.setRotation(heading || 0);
+    this.#map.addSource(SOURCE_IDS.brakes, { type: 'geojson', data: emptyFeatureCollection() });
+    this.#map.addLayer({
+      id: 'pace-brake-points',
+      type: 'circle',
+      source: SOURCE_IDS.brakes,
+      minzoom: 13,
+      paint: {
+        'circle-radius': 5,
+        'circle-color': '#ff5d66',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffd3d6',
+      },
+    });
   }
 }
 
-// Update curve markers on map
-function updateCurveMarkers() {
-  const features = upcomingCurves.map(curve => {
-    let label;
-    if (curve.isHairpin) {
-      label = `${curve.direction}H`;
-    } else if (curve.isSquare) {
-      label = `${curve.direction}SQ`;
-    } else {
-      label = `${curve.direction}${curve.severity}`;
-    }
+function buildRouteGeoJson(route) {
+  const features = [];
+  let activeColor = '#4f8cff';
+  let activeCoordinates = [route.coordinates[0]];
 
-    return {
+  for (let index = 1; index < route.coordinates.length; index += 1) {
+    const pointDistance = route.cumulativeDistances[index];
+    const nearbyCurve = route.curves.find((curve) => (
+      pointDistance >= curve.distanceFromStart - 85
+      && pointDistance <= curve.distanceFromStart + 45
+    ));
+    const color = nearbyCurve ? SEVERITY_COLORS[nearbyCurve.severity] : '#4f8cff';
+
+    activeCoordinates.push(route.coordinates[index]);
+    if (color !== activeColor) {
+      features.push(lineFeature(activeCoordinates, activeColor));
+      activeCoordinates = [route.coordinates[index - 1], route.coordinates[index]];
+      activeColor = color;
+    }
+  }
+
+  if (activeCoordinates.length >= 2) features.push(lineFeature(activeCoordinates, activeColor));
+  return { type: 'FeatureCollection', features };
+}
+
+function lineFeature(coordinates, color) {
+  return {
+    type: 'Feature',
+    geometry: { type: 'LineString', coordinates },
+    properties: { color },
+  };
+}
+
+function buildCurveGeoJson(curves) {
+  return {
+    type: 'FeatureCollection',
+    features: curves.map((curve) => ({
       type: 'Feature',
       geometry: { type: 'Point', coordinates: curve.position },
       properties: {
-        label,
-        color: curve.isHairpin ? '#dc2626' : getSeverityColor(curve.severity)
-      }
-    };
-  });
-
-  map.getSource('curves').setData({
-    type: 'FeatureCollection',
-    features
-  });
-
-  // Calculate and update brake points
-  updateBrakePoints();
-}
-
-// Calculate brake point positions on the route before each curve
-function updateBrakePoints() {
-  if (!routeCoordinates || routeCoordinates.length < 2) return;
-
-  const brakeFeatures = [];
-
-  upcomingCurves.forEach(curve => {
-    // Only show brake points for curves severity 1-4 (tight enough to need braking)
-    if (curve.severity > 4) return;
-
-    // Brake distance: tighter curves need earlier braking
-    // At ~45mph: severity 1 = 80m, severity 2 = 60m, severity 3 = 45m, severity 4 = 30m
-    const brakeDistanceM = (5 - curve.severity) * 20 + 20;
-
-    // Walk backwards along route from curve position to find brake point
-    const curveIdx = curve.routeIndex;
-    let distBack = 0;
-    let brakeIdx = curveIdx;
-
-    for (let j = curveIdx; j > 0; j--) {
-      distBack += getDistance(routeCoordinates[j], routeCoordinates[j - 1]) * 1000;
-      if (distBack >= brakeDistanceM) {
-        brakeIdx = j;
-        break;
-      }
-    }
-
-    if (brakeIdx !== curveIdx && brakeIdx < routeCoordinates.length) {
-      brakeFeatures.push({
-        type: 'Feature',
-        geometry: { type: 'Point', coordinates: routeCoordinates[brakeIdx] },
-        properties: {}
-      });
-    }
-  });
-
-  map.getSource('brakepoints').setData({
-    type: 'FeatureCollection',
-    features: brakeFeatures
-  });
-}
-
-// Get color for severity
-function getSeverityColor(severity) {
-  const colors = {
-    1: '#ef4444', 2: '#f97316', 3: '#eab308',
-    4: '#84cc16', 5: '#22c55e', 6: '#34d399'
+        color: SEVERITY_COLORS[curve.severity],
+        label: curve.isHairpin
+          ? `${curve.direction}H`
+          : curve.isSquare
+            ? `${curve.direction}SQ`
+            : `${curve.direction}${curve.severity}`,
+      },
+    })),
   };
-  return colors[severity] || '#888';
 }
 
-// Color-coded route line by curve severity
-function updateColoredRoute() {
-  if (!routeCoordinates || routeCoordinates.length < 2) return;
+function buildBrakeGeoJson(route) {
+  const features = route.curves
+    .filter((curve) => curve.severity <= 4)
+    .map((curve) => {
+      const brakeDistance = 25 + (5 - curve.severity) * 18;
+      const index = indexAtDistance(route.cumulativeDistances, curve.distanceFromStart - brakeDistance);
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: route.coordinates[index] },
+        properties: {},
+      };
+    });
 
-  // Build segments colored by proximity to curves
-  const segments = [];
-  let currentSegment = { coords: [routeCoordinates[0]], color: '#3b82f6' };
+  return { type: 'FeatureCollection', features };
+}
 
-  for (let i = 1; i < routeCoordinates.length; i++) {
-    // Find nearest curve to this point
-    let nearestSeverity = null;
-    let nearestDist = Infinity;
-
-    for (const curve of upcomingCurves) {
-      const d = Math.abs(i - curve.routeIndex);
-      if (d < nearestDist) {
-        nearestDist = d;
-        nearestSeverity = curve.severity;
-      }
-    }
-
-    // Color based on proximity to curve (within ~5 route points)
-    let color = '#3b82f6'; // default blue
-    if (nearestDist <= 5 && nearestSeverity !== null) {
-      color = getSeverityColor(nearestSeverity);
-    }
-
-    if (color !== currentSegment.color) {
-      // Bridge: add the current point to close the old segment
-      currentSegment.coords.push(routeCoordinates[i]);
-      segments.push(currentSegment);
-      currentSegment = { coords: [routeCoordinates[i]], color };
-    } else {
-      currentSegment.coords.push(routeCoordinates[i]);
-    }
-  }
-  segments.push(currentSegment);
-
-  // Build a GeoJSON FeatureCollection with colored segments
-  const features = segments
-    .filter(s => s.coords.length >= 2)
-    .map(s => ({
-      type: 'Feature',
-      geometry: { type: 'LineString', coordinates: s.coords },
-      properties: { color: s.color }
-    }));
-
-  map.getSource('route').setData({
-    type: 'FeatureCollection',
-    features
-  });
+function emptyFeatureCollection() {
+  return { type: 'FeatureCollection', features: [] };
 }

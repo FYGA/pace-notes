@@ -1,0 +1,9 @@
+{
+  "name": "pace-notes",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check js/main.js && node --check js/app.js"
+  }
+}

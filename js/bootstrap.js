@@ -1,0 +1,1 @@
+import{CORE_TEMPLATE as t}from"./template-core.js";import{SETTINGS_TEMPLATE as e}from"./template-settings.js";import{ROUTE_TEMPLATE as m}from"./template-route.js";document.getElementById("app").innerHTML=t+e+m,await import("./main.js");

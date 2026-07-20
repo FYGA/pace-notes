@@ -1,321 +1,202 @@
-// ============================
-// Curves - Multi-scale analysis, detection, compound curves, cautions
-// ============================
+import {
+  bearingDegrees,
+  buildCumulativeDistances,
+  indexAtDistance,
+  normalizeAngleDelta,
+  toRadians,
+} from './utils.js';
 
-// Analyze road geometry using multi-scale curve detection
-// Scans at 4 window sizes to catch both tight corners and wide sweepers
-function analyzeCurves(coordinates) {
-  upcomingCurves = [];
-  allRouteCurves = [];
-  lastSpokenCurve = null;
+export const SEVERITY_COLORS = Object.freeze({
+  1: '#ff5d66',
+  2: '#ff8c4b',
+  3: '#f5bd45',
+  4: '#a5d95b',
+  5: '#3ed598',
+  6: '#57d4c5',
+});
 
-  if (coordinates.length < 5) return;
+const ANALYSIS_WINDOWS = Object.freeze([
+  { meters: 45, step: 16, minimumAngle: 18, weight: 1.15 },
+  { meters: 90, step: 30, minimumAngle: 16, weight: 1.0 },
+  { meters: 180, step: 55, minimumAngle: 14, weight: 0.86 },
+  { meters: 320, step: 90, minimumAngle: 13, weight: 0.68 },
+]);
 
-  const detectedCurves = [];
+export function analyzeCurves(coordinates) {
+  if (!Array.isArray(coordinates) || coordinates.length < 5) return [];
 
-  // Multi-scale: analyze at different segment lengths
-  // Smaller windows catch tight turns, larger windows catch gradual sweepers
-  const scales = [
-    { distance: 50, weight: 0.6 },   // tight hairpins, square corners
-    { distance: 150, weight: 1.0 },  // sweet spot for most curves
-    { distance: 300, weight: 0.8 },  // long gradual curves
-    { distance: 500, weight: 0.5 }   // very wide sweeping turns
-  ];
+  const cumulativeDistances = buildCumulativeDistances(coordinates);
+  const totalDistance = cumulativeDistances.at(-1) ?? 0;
+  if (totalDistance < 35) return [];
 
-  for (const scale of scales) {
-    analyzeCurvesAtScale(coordinates, scale.distance, scale.weight, detectedCurves);
+  const candidates = [];
+  for (const analysisWindow of ANALYSIS_WINDOWS) {
+    candidates.push(...scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWindow));
   }
 
-  // Deduplicate curves detected at multiple scales
-  upcomingCurves = deduplicateCurves(detectedCurves);
-  allRouteCurves = upcomingCurves.map(c => ({ ...c }));
+  const curves = deduplicateCandidates(candidates)
+    .sort((a, b) => a.distanceFromStart - b.distanceFromStart)
+    .map((curve, index) => ({ ...curve, id: `curve-${index}-${Math.round(curve.distanceFromStart)}` }));
 
-  // Detect "tightens" and "opens" for consecutive curves
-  detectCompoundCurves();
-
-  // Detect caution patterns
-  detectCautions();
-
-  // Update map markers
-  updateCurveMarkers();
-  curvesEl.textContent = upcomingCurves.length;
+  decorateCompoundCurves(curves);
+  decorateCautions(curves);
+  return curves;
 }
 
-// Analyze curves at a specific segment scale
-function analyzeCurvesAtScale(coordinates, targetSegmentM, weight, detectedCurves) {
-  const minAngleChange = 15;
-  let i = 0;
+function scanWindow(coordinates, cumulativeDistances, totalDistance, analysisWindow) {
+  const halfWindow = analysisWindow.meters / 2;
+  if (totalDistance < analysisWindow.meters) return [];
 
-  while (i < coordinates.length - 2) {
-    let segmentStart = i;
-    let segmentEnd = i;
-    let segmentDistance = 0;
+  const candidates = [];
+  for (
+    let centerDistance = halfWindow;
+    centerDistance <= totalDistance - halfWindow;
+    centerDistance += analysisWindow.step
+  ) {
+    const startIndex = indexAtDistance(cumulativeDistances, centerDistance - halfWindow);
+    const centerIndex = indexAtDistance(cumulativeDistances, centerDistance);
+    const endIndex = indexAtDistance(cumulativeDistances, centerDistance + halfWindow);
 
-    // Find segment of approximately targetSegmentM meters
-    while (segmentEnd < coordinates.length - 1 && segmentDistance < targetSegmentM) {
-      segmentDistance += getDistance(coordinates[segmentEnd], coordinates[segmentEnd + 1]) * 1000;
-      segmentEnd++;
-    }
+    if (startIndex === centerIndex || centerIndex === endIndex) continue;
 
-    if (segmentEnd >= coordinates.length - 1) break;
+    const incomingBearing = bearingDegrees(coordinates[startIndex], coordinates[centerIndex]);
+    const outgoingBearing = bearingDegrees(coordinates[centerIndex], coordinates[endIndex]);
+    const signedAngle = normalizeAngleDelta(outgoingBearing - incomingBearing);
+    const absoluteAngle = Math.abs(signedAngle);
 
-    // Calculate bearing change over this segment
-    const bearing1 = getBearing(
-      coordinates[segmentStart],
-      coordinates[Math.min(segmentStart + 2, coordinates.length - 1)]
-    );
-    const bearing2 = getBearing(
-      coordinates[Math.max(segmentEnd - 2, 0)],
-      coordinates[segmentEnd]
-    );
-    let angleChange = bearing2 - bearing1;
+    if (absoluteAngle < analysisWindow.minimumAngle) continue;
 
-    // Normalize to -180 to 180
-    while (angleChange > 180) angleChange -= 360;
-    while (angleChange < -180) angleChange += 360;
+    const radiusMeters = estimateRadius(analysisWindow.meters, absoluteAngle);
+    const severity = severityFromRadius(radiusMeters, absoluteAngle);
+    const direction = signedAngle > 0 ? 'R' : 'L';
+    const entryDistance = Math.max(0, centerDistance - Math.min(analysisWindow.meters * 0.28, 45));
+    const entryIndex = indexAtDistance(cumulativeDistances, entryDistance);
+    const isHairpin = absoluteAngle >= 135 && radiusMeters < 48;
+    const isSquare = absoluteAngle >= 76 && absoluteAngle <= 104 && radiusMeters < 55;
+    const score = curveScore({ absoluteAngle, radiusMeters, weight: analysisWindow.weight });
 
-    const absAngle = Math.abs(angleChange);
-
-    if (absAngle >= minAngleChange) {
-      const severity = getSeverityFromAngle(absAngle);
-      const isHairpin = absAngle >= 150;
-      const isSquare = absAngle >= 85 && absAngle <= 95 && severity === 2;
-
-      const direction = angleChange > 0 ? 'right' : 'left';
-      const dirShort = angleChange > 0 ? 'R' : 'L';
-
-      // Use the turn-in point (entry of curve), not the midpoint
-      const curveEntryOffset = Math.min(3, Math.floor((segmentEnd - segmentStart) * 0.15));
-      const curvePointIdx = segmentStart + curveEntryOffset;
-      const distanceFromStart = getRouteDistance(coordinates, 0, curvePointIdx);
-
-      // Build rally call
-      let call;
-      if (isHairpin) {
-        call = `${direction} hairpin`;
-      } else if (isSquare) {
-        call = `${direction} square`;
-      } else {
-        call = `${direction} ${severity}`;
-      }
-
-      detectedCurves.push({
-        position: coordinates[curvePointIdx],
-        routeIndex: curvePointIdx,
-        severity,
-        direction: dirShort,
-        angle: Math.round(absAngle),
-        distanceFromStart,
-        distance: Math.round(distanceFromStart),
-        scale: targetSegmentM,
-        weight,
-        isHairpin,
-        isSquare,
-        call,
-        description: getCurveDescription(severity, absAngle, isHairpin, isSquare)
-      });
-    }
-
-    // Step forward: use half the segment size for overlap between windows
-    const stepSize = Math.max(1, Math.floor((segmentEnd - segmentStart) / 2));
-    i = segmentStart + stepSize;
-  }
-}
-
-// Get severity from angle (1=tightest, 6=fastest)
-function getSeverityFromAngle(absAngle) {
-  if (absAngle >= 150) return 1; // Hairpin
-  if (absAngle >= 110) return 1; // Very tight
-  if (absAngle >= 85 && absAngle <= 95) return 2; // Square
-  if (absAngle >= 80) return 2;  // Tight
-  if (absAngle >= 60) return 3;  // Medium-tight
-  if (absAngle >= 40) return 4;  // Medium-open
-  if (absAngle >= 25) return 5;  // Fast
-  return 6;                       // Very fast
-}
-
-// Deduplicate curves detected at multiple scales
-function deduplicateCurves(detectedCurves) {
-  if (detectedCurves.length === 0) return [];
-
-  // Sort by route distance
-  detectedCurves.sort((a, b) => a.distanceFromStart - b.distanceFromStart);
-
-  // Group curves within 100m of each other
-  const groups = [];
-  for (const curve of detectedCurves) {
-    const group = groups.find(g =>
-      Math.abs(g.center - curve.distanceFromStart) < 100 &&
-      g.direction === curve.direction
-    );
-    if (group) {
-      group.curves.push(curve);
-      // Update group center to weighted average
-      group.center = group.curves.reduce((s, c) => s + c.distanceFromStart, 0) / group.curves.length;
-    } else {
-      groups.push({
-        center: curve.distanceFromStart,
-        direction: curve.direction,
-        curves: [curve]
-      });
-    }
-  }
-
-  // For each group, pick the best representation
-  // Prefer 150m scale (weight 1.0), then tightest severity
-  return groups.map(group => {
-    group.curves.sort((a, b) => {
-      // Primary: prefer higher weight (150m scale)
-      if (b.weight !== a.weight) return b.weight - a.weight;
-      // Secondary: prefer tighter severity (lower number = tighter)
-      return a.severity - b.severity;
+    candidates.push({
+      position: coordinates[entryIndex],
+      routeIndex: entryIndex,
+      severity,
+      direction,
+      angle: Math.round(absoluteAngle),
+      radiusMeters: Math.round(radiusMeters),
+      distanceFromStart: cumulativeDistances[entryIndex],
+      distance: Math.round(cumulativeDistances[entryIndex]),
+      isHairpin,
+      isSquare,
+      score,
+      call: buildBaseCall({ direction, severity, isHairpin, isSquare }),
+      description: describeCurve({ severity, absoluteAngle, radiusMeters, isHairpin, isSquare }),
     });
-    return group.curves[0];
-  });
+  }
+
+  return candidates;
 }
 
-// Detect compound curves (tightens/opens)
-function detectCompoundCurves() {
-  for (let i = 0; i < upcomingCurves.length - 1; i++) {
-    const current = upcomingCurves[i];
-    const next = upcomingCurves[i + 1];
+function estimateRadius(windowMeters, absoluteAngle) {
+  const radians = Math.max(toRadians(absoluteAngle), 0.01);
+  return windowMeters / radians;
+}
 
-    const distBetween = Math.abs(current.distanceFromStart - next.distanceFromStart);
-    if (distBetween < 150 && current.direction === next.direction) {
-      const dir = current.direction === 'R' ? 'right' : 'left';
-      if (next.severity < current.severity) {
-        current.modifier = 'tightens';
-        current.tightensTo = next.severity;
-        current.call = `${dir} ${current.severity} tightens ${next.severity}`;
-      } else if (next.severity > current.severity) {
-        current.modifier = 'opens';
-        current.opensTo = next.severity;
-        current.call = `${dir} ${current.severity} opens ${next.severity}`;
-      }
+function severityFromRadius(radiusMeters, absoluteAngle) {
+  if (absoluteAngle >= 150 && radiusMeters < 52) return 1;
+  if (radiusMeters < 22) return 1;
+  if (radiusMeters < 34) return 2;
+  if (radiusMeters < 52) return 3;
+  if (radiusMeters < 78) return 4;
+  if (radiusMeters < 120) return 5;
+  return 6;
+}
+
+function curveScore({ absoluteAngle, radiusMeters, weight }) {
+  const turnStrength = Math.min(absoluteAngle / 90, 2);
+  const radiusStrength = Math.min(65 / Math.max(radiusMeters, 1), 2.5);
+  return (turnStrength + radiusStrength) * weight;
+}
+
+function deduplicateCandidates(candidates) {
+  const sorted = [...candidates].sort((a, b) => b.score - a.score);
+  const accepted = [];
+
+  for (const candidate of sorted) {
+    const duplicate = accepted.some((curve) => {
+      const separation = Math.abs(curve.distanceFromStart - candidate.distanceFromStart);
+      const threshold = Math.max(45, Math.min(95, (curve.radiusMeters + candidate.radiusMeters) * 0.55));
+      return curve.direction === candidate.direction && separation < threshold;
+    });
+
+    if (!duplicate) accepted.push(candidate);
+  }
+
+  return accepted;
+}
+
+function decorateCompoundCurves(curves) {
+  for (let index = 0; index < curves.length - 1; index += 1) {
+    const current = curves[index];
+    const next = curves[index + 1];
+    const gap = next.distanceFromStart - current.distanceFromStart;
+
+    if (gap > 170 || current.direction !== next.direction) continue;
+
+    if (next.severity < current.severity) {
+      current.modifier = 'tightens';
+      current.modifierSeverity = next.severity;
+    } else if (next.severity > current.severity) {
+      current.modifier = 'opens';
+      current.modifierSeverity = next.severity;
     }
+
+    if (current.modifier) current.call = buildCallText(current);
   }
 }
 
-// Detect caution patterns on curves
-function detectCautions() {
-  for (let i = 0; i < upcomingCurves.length; i++) {
-    const curve = upcomingCurves[i];
+function decorateCautions(curves) {
+  curves.forEach((curve, index) => {
+    const previous = curves[index - 1];
+    const gap = previous ? curve.distanceFromStart - previous.distanceFromStart : curve.distanceFromStart;
 
-    // "Don't cut" - tight inside curves
     if (curve.isHairpin || (curve.severity <= 2 && curve.angle >= 100)) {
       curve.caution = "don't cut";
-    }
-
-    // "Sudden" - sharp curve after a long straight
-    if (i > 0 && curve.severity <= 3) {
-      const gap = curve.distanceFromStart - upcomingCurves[i - 1].distanceFromStart;
-      if (gap > 300) {
-        curve.caution = 'sudden';
-      }
-    } else if (i === 0 && curve.severity <= 2 && curve.distanceFromStart > 300) {
+    } else if (curve.severity <= 3 && gap > 320) {
       curve.caution = 'sudden';
-    }
-
-    // "Long" - curves that span a big angle
-    if (curve.angle >= 130 && !curve.isHairpin) {
+    } else if (curve.angle >= 125 && !curve.isHairpin) {
       curve.caution = 'long';
     }
-  }
-}
-
-// Get curve description text
-function getCurveDescription(severity, angle, isHairpin, isSquare) {
-  if (isHairpin) return `Hairpin ${angle}\u00B0 - very slow, may need handbrake`;
-  if (isSquare) return `Square ${angle}\u00B0 - 90\u00B0 corner`;
-  if (severity === 1) return `${angle}\u00B0 - 1st gear, very tight`;
-  if (severity === 2) return `${angle}\u00B0 - 2nd gear, tight`;
-  if (severity === 3) return `${angle}\u00B0 - 3rd gear, medium`;
-  if (severity === 4) return `${angle}\u00B0 - 4th gear, open`;
-  if (severity === 5) return `${angle}\u00B0 - 5th gear, fast`;
-  return `${angle}\u00B0 - 6th gear, flat out`;
-}
-
-// Update distances to curves using along-route distance
-function updateCurveDistances() {
-  if (!currentPosition || upcomingCurves.length === 0 || routeCoordinates.length < 2) return;
-
-  // Find closest point on route to current position
-  let closestIdx = 0;
-  let closestDist = Infinity;
-  for (let i = 0; i < routeCoordinates.length; i++) {
-    const d = getDistance(currentPosition, routeCoordinates[i]);
-    if (d < closestDist) {
-      closestDist = d;
-      closestIdx = i;
-    }
-  }
-
-  // Calculate along-route distance from our position to each curve
-  upcomingCurves.forEach(curve => {
-    if (curve.routeIndex > closestIdx) {
-      curve.distance = Math.round(getRouteDistance(routeCoordinates, closestIdx, curve.routeIndex));
-    } else {
-      curve.distance = -Math.round(getRouteDistance(routeCoordinates, curve.routeIndex, closestIdx));
-    }
   });
-
-  // Sort by distance (nearest first)
-  upcomingCurves.sort((a, b) => a.distance - b.distance);
-
-  // Filter out passed curves
-  upcomingCurves = upcomingCurves.filter(c => c.distance > -20);
-
-  curvesEl.textContent = upcomingCurves.length;
-
-  // Update UI
-  updateUpcomingDisplay();
 }
 
-// Check if we should call out a curve
-function checkForCallouts() {
-  if (upcomingCurves.length === 0) return;
-
-  const next = upcomingCurves[0];
-
-  const reactionTime = {
-    1: 5.0, 2: 4.5, 3: 4.0, 4: 3.5, 5: 3.0, 6: 2.5
-  };
-
-  const speedMs = currentSpeed * 0.447;
-  const severityReactionTime = reactionTime[next.severity] || 4;
-  const calloutDistance = Math.max(60, speedMs * severityReactionTime);
-
-  if (next.distance <= calloutDistance && next.distance > 10) {
-    if (lastSpokenCurve !== next) {
-      // Count turn regardless of sound setting
-      sessionTurnsPassed++;
-      if (soundEnabled) {
-        speakCurve(next);
-      }
-      lastSpokenCurve = next;
-    }
-  }
+function buildBaseCall({ direction, severity, isHairpin, isSquare }) {
+  const word = direction === 'L' ? 'left' : 'right';
+  if (isHairpin) return `${word} hairpin`;
+  if (isSquare) return `${word} square`;
+  return `${word} ${severity}`;
 }
 
-// Check if route is complete (all curves passed, near endpoint)
-function checkRouteCompletion() {
-  if (!isRouteLoaded || !currentPosition || routeCoordinates.length < 2) return;
-
-  const lastCoord = routeCoordinates[routeCoordinates.length - 1];
-  const distToEnd = getDistance(currentPosition, lastCoord) * 1000; // meters
-
-  if (distToEnd < 50 && upcomingCurves.length === 0) {
-    showStatus('Route complete!');
-    setTimeout(hideStatus, 4000);
-  }
-}
-
-// Build rally call text for a curve
-function buildCallText(curve) {
+export function buildCallText(curve) {
   const direction = curve.direction === 'L' ? 'left' : 'right';
   if (curve.isHairpin) return `${direction} hairpin`;
   if (curve.isSquare) return `${direction} square`;
-  if (curve.modifier === 'tightens') return `${direction} ${curve.severity} tightens ${curve.tightensTo}`;
-  if (curve.modifier === 'opens') return `${direction} ${curve.severity} opens ${curve.opensTo}`;
+  if (curve.modifier === 'tightens') return `${direction} ${curve.severity} tightens ${curve.modifierSeverity}`;
+  if (curve.modifier === 'opens') return `${direction} ${curve.severity} opens ${curve.modifierSeverity}`;
   return `${direction} ${curve.severity}`;
+}
+
+function describeCurve({ severity, absoluteAngle, radiusMeters, isHairpin, isSquare }) {
+  const angle = Math.round(absoluteAngle);
+  const radius = Math.round(radiusMeters);
+  if (isHairpin) return `${angle}° hairpin · roughly ${radius} m radius`;
+  if (isSquare) return `${angle}° square corner · roughly ${radius} m radius`;
+
+  const labels = {
+    1: 'very tight',
+    2: 'tight',
+    3: 'medium',
+    4: 'open',
+    5: 'fast',
+    6: 'very fast',
+  };
+  return `${angle}° ${labels[severity]} curve · roughly ${radius} m radius`;
 }
