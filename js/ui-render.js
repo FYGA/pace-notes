@@ -11,32 +11,64 @@ export function renderState(s, i) {
     setBackgroundInert(s, i.ui.settingsOpen, i.ui.routeOpen),
     s.routePanel.classList.toggle("is-hidden", !i.ui.routeOpen));
   const a = i.hasSavedToken && !i.ui.showTokenInput;
+  const selectedPlanCandidate = i.routePlan.candidates.find(
+    (candidate) => candidate.id === i.routePlan.selectedId,
+  );
+  const summaryRoute =
+    selectedPlanCandidate?.route ||
+    (i.routePlan.status === "loading" ? { loaded: false } : i.route);
   (s.savedTokenView.classList.toggle("is-hidden", !a),
     s.tokenForm.classList.toggle("is-hidden", a),
     (s.maskedToken.textContent = i.maskedToken),
     (s.paceNoteProfile.value = i.preferences.paceNoteProfile),
-    s.routeSummary.classList.toggle("is-hidden", !i.route.loaded),
-    (s.routeName.textContent = i.route.name || "Destination"),
-    (s.routeDistance.textContent = i.route.loaded
-      ? `${(i.route.distanceMeters / 1609.344).toFixed(1)} mi`
+    (s.preferWinding.checked = i.preferences.preferWindingRoutes),
+    s.routeForm.classList.toggle("is-hidden", i.ui.routeMode !== "destination"),
+    s.loopForm.classList.toggle("is-hidden", i.ui.routeMode !== "loop"),
+    s.destinationModeButton.classList.toggle(
+      "is-active",
+      i.ui.routeMode === "destination",
+    ),
+    s.loopModeButton.classList.toggle("is-active", i.ui.routeMode === "loop"),
+    s.destinationModeButton.setAttribute(
+      "aria-pressed",
+      String(i.ui.routeMode === "destination"),
+    ),
+    s.loopModeButton.setAttribute(
+      "aria-pressed",
+      String(i.ui.routeMode === "loop"),
+    ),
+    renderRouteCandidates(s, i),
+    s.routeSummary.classList.toggle("is-hidden", !summaryRoute.loaded),
+    (s.routeName.textContent = summaryRoute.name || "Destination"),
+    (s.routeDistance.textContent = summaryRoute.loaded
+      ? `${(summaryRoute.distanceMeters / 1609.344).toFixed(1)} mi`
       : "—"),
-    (s.routeDuration.textContent = i.route.loaded
-      ? o(i.route.durationSeconds)
+    (s.routeDuration.textContent = summaryRoute.loaded
+      ? o(summaryRoute.durationSeconds)
       : "—"),
-    (s.routeCurves.textContent = i.route.loaded
-      ? String(i.route.curves.length)
+    (s.routeCurves.textContent = summaryRoute.loaded
+      ? String(summaryRoute.curves.length)
+      : "—"),
+    (s.routeStyle.textContent = summaryRoute.loaded
+      ? summaryRoute.styleLabel || "Direct"
       : "—"),
     (function (t, e) {
       const o = "tracking" === e.mode,
         n = "demo" === e.mode,
         s = "loading-demo" === e.mode;
-      ((t.startDrivingButton.disabled = !e.route.loaded || e.busy || o || n),
+      ((t.startDrivingButton.disabled =
+        (!e.route.loaded && !e.routePlan.selectedId) || e.busy || o || n),
         (t.connectMapButton.disabled = e.busy),
         (t.useSavedTokenButton.disabled = e.busy),
         (t.changeTokenButton.disabled = e.busy),
         (t.tokenInput.disabled = e.busy),
         (t.paceNoteProfile.disabled = e.busy || e.mode !== "idle"),
         (t.loadRouteButton.disabled = e.busy),
+        (t.loadLoopButton.disabled = e.busy),
+        (t.loopDistance.disabled = e.busy),
+        (t.destinationModeButton.disabled = e.busy),
+        (t.loopModeButton.disabled = e.busy),
+        (t.preferWinding.disabled = e.busy),
         (t.startButton.disabled = !e.route.loaded || e.busy || n),
         t.startButton.classList.toggle("button--primary", !o),
         t.startButton.classList.toggle("button--danger", o),
@@ -192,6 +224,38 @@ function setBackgroundInert(elements, settingsOpen, routeOpen) {
       child.toggleAttribute("inert", Boolean(activePanel));
     }
   }
+}
+
+function renderRouteCandidates(elements, state) {
+  const cards = state.routePlan.candidates.map((candidate) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "route-candidate";
+    button.dataset.candidateId = candidate.id;
+    button.setAttribute("role", "radio");
+    button.setAttribute(
+      "aria-checked",
+      String(candidate.id === state.routePlan.selectedId),
+    );
+    button.tabIndex = candidate.id === state.routePlan.selectedId ? 0 : -1;
+
+    const label = document.createElement("strong");
+    label.textContent = candidate.label;
+    const score = document.createElement("span");
+    score.textContent = Number.isFinite(candidate.score)
+      ? `Winding estimate ${Math.round(candidate.score)}/100`
+      : "Provider route";
+    const facts = document.createElement("span");
+    facts.textContent = `${(candidate.route.distanceMeters / 1609.344).toFixed(1)} mi · ${o(candidate.route.durationSeconds)} · ${candidate.route.curves.length} curves`;
+    button.append(label, score, facts);
+    return button;
+  });
+  elements.routeCandidates.replaceChildren(...cards);
+  elements.routeCandidates.classList.toggle("is-hidden", cards.length < 2);
+
+  const notice = state.routePlan.error || state.routePlan.notice || "";
+  elements.routePlanNotice.textContent = notice;
+  elements.routePlanNotice.classList.toggle("is-hidden", !notice);
 }
 
 function setText(element, value) {

@@ -1,0 +1,134 @@
+.route-type-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(5, 7, 11, 0.45);
+}
+
+.route-type-toggle button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.route-type-toggle button.is-active {
+  background: rgba(79, 140, 255, 0.2);
+  color: #dce7ff;
+}
+
+.loop-form {
+  display: grid;
+  gap: 8px;
+}
+
+.loop-form > label {
+  color: #d0d5dd;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.loop-form > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.loop-form select {
+  min-height: 52px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(5, 7, 11, 0.58);
+  color: var(--text);
+  padding: 0 13px;
+}
+
+.loop-form p,
+.route-preference {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.loop-form p {
+  margin: 0;
+}
+
+.route-preference {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  min-height: 44px;
+  margin: 14px 0 0;
+  padding: 4px 0;
+}
+
+.route-preference input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.route-summary__stats {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.route-candidates {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.route-candidate {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 12px;
+  width: 100%;
+  min-height: 54px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--text);
+  text-align: left;
+}
+
+.route-candidate[aria-checked="true"] {
+  border-color: rgba(79, 140, 255, 0.62);
+  background: rgba(79, 140, 255, 0.15);
+}
+
+.route-candidate strong,
+.route-candidate span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.route-plan-notice {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.route-candidate span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+@media (max-width: 360px) {
+  .loop-form > div {
+    grid-template-columns: 1fr;
+  }
+
+  .route-summary__stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

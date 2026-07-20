@@ -19,7 +19,7 @@ import {
   saveMapboxToken,
   savePreferences,
 } from "./settings.js";
-import { createInitialState, Store } from "./state.js";
+import { createEmptyRoutePlan, createInitialState, Store } from "./state.js";
 import { PositionTracker } from "./tracking.js";
 import { AppView } from "./ui.js";
 import {
@@ -27,11 +27,18 @@ import {
   closestRoutePoint,
   distanceMeters,
 } from "./utils.js";
+import {
+  generateRoundTripWaypoints,
+  rankWindingRoutes,
+  WINDING_ROUTE_RANKING_NOTICE,
+} from "./winding.js";
 
 const OFF_ROUTE_METERS = 60;
 const BACK_ON_ROUTE_METERS = 35;
 const COMPLETE_DISTANCE_METERS = 55;
 const MIN_HEADING_CHECK_SPEED_MPH = 8;
+const ROUND_TRIP_COMPLETION_RATIO = 0.85;
+const MAX_AUTOMATIC_DESTINATION_DETOUR_RATIO = 1.35;
 
 export class PaceNotesApp {
   #store;
@@ -53,6 +60,7 @@ export class PaceNotesApp {
   #resyncAwaitingHeading = false;
   #directionConfirmed = false;
   #routeCompleted = false;
+  #roundTripConfirmedHighWaterMeters = 0;
   #sessionTimer = null;
   #modeGeneration = 0;
   #stopPromise = null;
@@ -87,9 +95,14 @@ export class PaceNotesApp {
       onChangeToken: () => this.#changeToken(),
       onChangePaceNoteProfile: (profile) =>
         this.#changePaceNoteProfile(profile),
+      onChangePreferWinding: (enabled) => this.#changePreferWinding(enabled),
+      onChangeRouteMode: (mode) => this.#changeRouteMode(mode),
       onLoadRoute: (destination) => this.#loadRoute(destination),
+      onLoadLoop: (distanceMiles) => this.#loadLoop(distanceMiles),
+      onSelectRouteCandidate: (candidateId) =>
+        this.#selectRouteCandidate(candidateId),
       onCloseRoute: () => this.#closeRoute(),
-      onStartDriving: () => this.#startTracking(),
+      onStartDriving: () => this.#startSelectedRoute(),
       onToggleTracking: () => this.#toggleTracking(),
       onToggleDemo: () => this.#toggleDemo(),
       onOpenRoute: () => this.#openRoute(),
@@ -177,18 +190,34 @@ export class PaceNotesApp {
     const state = this.#store.getState();
     if (state.busy || state.mode !== "idle") return;
 
-    const preferences = savePreferences({ paceNoteProfile: profile });
+    const preferences = savePreferences({
+      ...state.preferences,
+      paceNoteProfile: profile,
+    });
     const route = state.route.loaded
       ? rematerializeRoute(state.route, preferences.paceNoteProfile)
       : state.route;
+    const routePlan = {
+      ...state.routePlan,
+      candidates: state.routePlan.candidates.map((candidate) => ({
+        ...candidate,
+        route: rematerializeRoute(
+          candidate.route,
+          preferences.paceNoteProfile,
+        ),
+      })),
+    };
     if (route.loaded) {
       this.#scheduler.reset(route.curves);
-      this.#map.setRoute(route);
     }
+    const previewRoute = selectedRouteFromPlan(routePlan);
+    if (previewRoute) this.#map.setRoute(previewRoute);
+    else if (route.loaded) this.#map.setRoute(route);
     this.#store.update((current) => ({
       ...current,
       preferences,
       route,
+      routePlan,
     }));
     this.#view.showToast(
       preferences.paceNoteProfile === "descriptive"
@@ -196,6 +225,41 @@ export class PaceNotesApp {
         : "Numerical pace-note wording selected.",
       { tone: "success" },
     );
+  }
+
+  #changePreferWinding(enabled) {
+    const state = this.#store.getState();
+    if (state.busy || state.mode !== "idle") return;
+    const preferences = savePreferences({
+      ...state.preferences,
+      preferWindingRoutes: Boolean(enabled),
+    });
+    if (state.routePlan.candidates.length) {
+      if (state.route.loaded) this.#map.setRoute(state.route);
+      else this.#map.clearRoute();
+    }
+    this.#store.update((current) => ({
+      ...current,
+      preferences,
+      routePlan: state.routePlan.candidates.length
+        ? createEmptyRoutePlan()
+        : current.routePlan,
+    }));
+  }
+
+  #changeRouteMode(routeMode) {
+    if (routeMode !== "destination" && routeMode !== "loop") return;
+    const current = this.#store.getState();
+    if (current.routePlan.candidates.length) {
+      if (current.route.loaded) this.#map.setRoute(current.route);
+      else this.#map.clearRoute();
+    }
+    this.#store.update((state) => ({
+      ...state,
+      routePlan: createEmptyRoutePlan(),
+      ui: { ...state.ui, routeMode },
+    }));
+    if (routeMode === "destination") this.#view.focusDestination();
   }
 
   async #loadRoute(destination) {
@@ -212,6 +276,11 @@ export class PaceNotesApp {
       ...state,
       busy: true,
       mode: "loading-route",
+      routePlan: {
+        ...createEmptyRoutePlan(),
+        status: "loading",
+        notice: "Searching route alternatives…",
+      },
     }));
 
     try {
@@ -227,44 +296,191 @@ export class PaceNotesApp {
       const result = await this.#routing.directions(
         telemetry.position,
         destinationResult.coordinates,
-        { signal: controller.signal },
+        {
+          signal: controller.signal,
+          alternatives:
+            this.#store.getState().preferences.preferWindingRoutes &&
+            this.#routing.supports("alternatives"),
+        },
       );
       if (!result || result.coordinates.length < 8) {
         throw new Error("The route is too short to analyze.");
       }
 
       if (this.#routeAbortController !== controller) return;
-      const route = buildRoute(
+      const plan = buildRoutePlan(
         destinationResult.name,
-        result,
+        result.routes || [result],
         this.#store.getState().preferences.paceNoteProfile,
+        this.#store.getState().preferences.preferWindingRoutes,
+        { routeKind: "destination" },
       );
-      this.#scheduler.reset(route.curves);
-      this.#map.setRoute(route);
-      this.#offRouteLatched = false;
-      this.#callsPaused = false;
-      this.#resyncAwaitingHeading = false;
-      this.#directionConfirmed = false;
-      this.#routeCompleted = false;
+      const selectedRoute = selectedRouteFromPlan(plan);
+      this.#map.setRoute(selectedRoute);
       this.#store.update((state) => ({
         ...state,
         busy: false,
         mode: "idle",
         telemetry: { ...state.telemetry, ...telemetry },
-        route,
+        routePlan: plan,
       }));
-      this.#view.showToast(`Route ready · ${route.curves.length} curves`, {
-        tone: "success",
-      });
+      this.#view.showToast(
+        `Preview ready · ${plan.candidates.length} route option${plan.candidates.length === 1 ? "" : "s"}`,
+        { tone: "success" },
+      );
     } catch (error) {
       if (error.name === "AbortError") return;
       if (this.#routeAbortController !== controller) return;
+      const committedRoute = this.#store.getState().route;
+      if (committedRoute.loaded) this.#map.setRoute(committedRoute);
+      else this.#map.clearRoute();
       this.#store.update((state) => ({
         ...state,
         busy: false,
         mode: "idle",
+        routePlan: {
+          ...createEmptyRoutePlan(),
+          status: "error",
+          error: error.message || "Could not load that route.",
+        },
       }));
       this.#view.showToast(error.message || "Could not load that route.", {
+        tone: "error",
+        duration: 3_800,
+      });
+    } finally {
+      if (this.#routeAbortController === controller) {
+        this.#routeAbortController = null;
+      }
+    }
+  }
+
+  async #loadLoop(distanceMiles) {
+    const targetMiles = Number(distanceMiles);
+    if (!Number.isFinite(targetMiles) || targetMiles < 5 || targetMiles > 250) {
+      this.#view.showToast("Choose a loop length from 5 to 250 miles.", {
+        tone: "error",
+      });
+      return;
+    }
+    if (!this.#routing.supports("waypoints")) {
+      this.#view.showToast(
+        "The connected routing provider cannot build round trips.",
+        { tone: "error", duration: 3_600 },
+      );
+      return;
+    }
+
+    await this.#stopActiveMode();
+    this.#routeAbortController?.abort();
+    const controller = new AbortController();
+    this.#routeAbortController = controller;
+    this.#store.update((state) => ({
+      ...state,
+      busy: true,
+      mode: "loading-route",
+      routePlan: {
+        ...createEmptyRoutePlan(),
+        status: "loading",
+        notice: "Building winding loop candidates…",
+      },
+    }));
+
+    try {
+      const telemetry = await this.#positionTracker.getCurrentPosition();
+      const targetLengthMeters = targetMiles * 1609.344;
+      const seedBase = `${telemetry.position.map((value) => value.toFixed(3)).join(",")}-${Math.round(targetMiles)}`;
+      const plans = [0, 1, 2].map((index) =>
+        generateRoundTripWaypoints({
+          center: telemetry.position,
+          targetLengthMeters,
+          seed: `${seedBase}-${index}`,
+        }),
+      );
+      const results = await Promise.allSettled(
+        plans.map((plan) =>
+          this.#routing.directions(telemetry.position, telemetry.position, {
+            signal: controller.signal,
+            waypoints: plan.waypoints.map((waypoint) => waypoint.coordinates),
+          }),
+        ),
+      );
+      if (this.#routeAbortController !== controller) return;
+
+      const candidates = results
+        .map((result, index) =>
+          result.status === "fulfilled" && result.value
+            ? {
+                ...result.value.primaryRoute,
+                id: `loop-${index}-${result.value.primaryRoute.id}`,
+              }
+            : null,
+        )
+        .filter(Boolean)
+        .filter(
+          (candidate) =>
+            candidate.distanceMeters >= targetLengthMeters * 0.5 &&
+            candidate.distanceMeters <= targetLengthMeters * 1.85,
+        );
+      if (!candidates.length) {
+        throw new Error(
+          "No practical loop was found. Try another length or starting area.",
+        );
+      }
+      const practicalCandidates = rankWindingRoutes(candidates)
+        .filter(
+          (candidate) =>
+            candidate.uTurnCount === 0 && candidate.loopArtifactCount <= 1,
+        )
+        .map((candidate) => candidate.candidate);
+      if (!practicalCandidates.length) {
+        throw new Error(
+          "The loop candidates doubled back or crossed themselves. Try another length.",
+        );
+      }
+
+      const plan = buildRoutePlan(
+        `Winding loop · about ${Math.round(targetMiles)} mi`,
+        practicalCandidates,
+        this.#store.getState().preferences.paceNoteProfile,
+        true,
+        {
+          routeKind: "round-trip",
+          styleLabel: "Winding loop",
+          targetDistanceMeters: targetLengthMeters,
+        },
+      );
+      const selectedRoute = selectedRouteFromPlan(plan);
+      this.#map.setUserPosition(telemetry.position, telemetry.heading || 0);
+      this.#map.setRoute(selectedRoute);
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "idle",
+        telemetry: { ...state.telemetry, ...telemetry },
+        routePlan: plan,
+      }));
+      this.#view.showToast(
+        `Loop ready · ranked ${practicalCandidates.length} geometry candidates`,
+        { tone: "success" },
+      );
+    } catch (error) {
+      if (error.name === "AbortError") return;
+      if (this.#routeAbortController !== controller) return;
+      const committedRoute = this.#store.getState().route;
+      if (committedRoute.loaded) this.#map.setRoute(committedRoute);
+      else this.#map.clearRoute();
+      this.#store.update((state) => ({
+        ...state,
+        busy: false,
+        mode: "idle",
+        routePlan: {
+          ...createEmptyRoutePlan(),
+          status: "error",
+          error: error.message || "Could not build a loop.",
+        },
+      }));
+      this.#view.showToast(error.message || "Could not build a loop.", {
         tone: "error",
         duration: 3_800,
       });
@@ -285,11 +501,57 @@ export class PaceNotesApp {
   }
 
   #closeRoute() {
+    this.#routeAbortController?.abort();
+    this.#routeAbortController = null;
+    const committedRoute = this.#store.getState().route;
+    if (committedRoute.loaded) this.#map.setRoute(committedRoute);
+    else this.#map.clearRoute();
     this.#store.update((state) => ({
       ...state,
+      busy: false,
+      mode: state.mode === "loading-route" ? "idle" : state.mode,
+      routePlan: createEmptyRoutePlan(),
       ui: { ...state.ui, routeOpen: false },
     }));
     this.#view.focusRouteButton();
+  }
+
+  #selectRouteCandidate(candidateId) {
+    const state = this.#store.getState();
+    const candidate = state.routePlan.candidates.find(
+      (item) => item.id === candidateId,
+    );
+    if (!candidate || state.busy) return;
+    this.#map.setRoute(candidate.route);
+    this.#store.update((current) => ({
+      ...current,
+      routePlan: { ...current.routePlan, selectedId: candidate.id },
+    }));
+  }
+
+  #startSelectedRoute() {
+    const state = this.#store.getState();
+    const selected = state.routePlan.candidates.find(
+      (candidate) => candidate.id === state.routePlan.selectedId,
+    );
+    if (selected) {
+      this.#scheduler.reset(selected.route.curves);
+      this.#map.setRoute(selected.route);
+      this.#offRouteLatched = false;
+      this.#callsPaused = false;
+      this.#resyncAwaitingHeading = false;
+      this.#directionConfirmed = false;
+      this.#routeCompleted = false;
+      this.#roundTripConfirmedHighWaterMeters = 0;
+      this.#store.update((current) => ({
+        ...current,
+        route: selected.route,
+        routePlan: createEmptyRoutePlan(),
+      }));
+    } else if (state.route.loaded) {
+      this.#map.setRoute(state.route);
+    }
+    return this.#startTracking();
   }
 
   #openSettings() {
@@ -342,6 +604,7 @@ export class PaceNotesApp {
     this.#resyncAwaitingHeading = false;
     this.#directionConfirmed = false;
     this.#routeCompleted = false;
+    this.#roundTripConfirmedHighWaterMeters = 0;
     const route = resetRouteProgress(this.#store.getState().route);
 
     this.#store.update((current) => ({
@@ -622,6 +885,7 @@ export class PaceNotesApp {
     const progressJump = Math.abs(
       match.distanceAlongRoute - state.route.progressMeters,
     );
+    const routeLength = state.route.cumulativeDistances.at(-1) || 0;
     if (
       !demo &&
       callUsable &&
@@ -670,7 +934,20 @@ export class PaceNotesApp {
         speedMph: telemetry.speedMph,
       });
     if (resynced) {
-      progressMeters = match.distanceAlongRoute;
+      const holdAmbiguousLoopProgress =
+        shouldHoldRoundTripReacquisition({
+          routeKind: state.route.routeKind,
+          reacquired: match.reacquired,
+          distanceToEndMeters: distanceMeters(
+            telemetry.position,
+            state.route.endPoint,
+          ),
+          confirmedHighWaterMeters: this.#roundTripConfirmedHighWaterMeters,
+          routeLengthMeters: routeLength,
+        });
+      progressMeters = holdAmbiguousLoopProgress
+        ? state.route.progressMeters
+        : match.distanceAlongRoute;
       callUsable = false;
       this.#resyncAwaitingHeading = true;
       this.#directionConfirmed = false;
@@ -780,11 +1057,29 @@ export class PaceNotesApp {
       animate: true,
     });
 
-    const routeLength = state.route.cumulativeDistances.at(-1) || 0;
-    const reachedEnd =
-      progressMeters >= Math.max(0, routeLength - 35) &&
-      distanceMeters(telemetry.position, state.route.endPoint) <
-        COMPLETE_DISTANCE_METERS;
+    if (
+      !demo &&
+      quality.usable &&
+      !offRoute &&
+      !match.reacquired &&
+      directionCompatible
+    ) {
+      this.#roundTripConfirmedHighWaterMeters = Math.max(
+        this.#roundTripConfirmedHighWaterMeters,
+        progressMeters,
+      );
+    }
+    const reachedEnd = canCompleteRoute({
+      routeKind: state.route.routeKind,
+      progressMeters,
+      routeLengthMeters: routeLength,
+      distanceToEndMeters: distanceMeters(
+        telemetry.position,
+        state.route.endPoint,
+      ),
+      reacquired: match.reacquired,
+      confirmedHighWaterMeters: this.#roundTripConfirmedHighWaterMeters,
+    });
     if (!demo && reachedEnd && !this.#routeCompleted) {
       this.#routeCompleted = true;
       void this.#stopActiveMode({ completed: true });
@@ -889,7 +1184,12 @@ export class PaceNotesApp {
   }
 }
 
-export function buildRoute(name, result, profileId = "numerical") {
+export function buildRoute(
+  name,
+  result,
+  profileId = "numerical",
+  metadata = {},
+) {
   const cumulativeDistances = buildCumulativeDistances(result.coordinates);
   const curves = materializeCurves(analyzeCurves(result.coordinates), profileId);
   return {
@@ -912,7 +1212,194 @@ export function buildRoute(name, result, profileId = "numerical") {
     closestIndex: 0,
     segmentIndex: 0,
     progressMeters: 0,
+    routeKind: metadata.routeKind || "destination",
+    styleLabel: metadata.styleLabel || "Direct",
+    windingScore: Number.isFinite(metadata.windingScore)
+      ? metadata.windingScore
+      : null,
+    rankingNotice: metadata.rankingNotice || null,
+    candidateCount: metadata.candidateCount || 1,
+    targetDistanceMeters: metadata.targetDistanceMeters || null,
   };
+}
+
+export function chooseRouteCandidate(
+  candidates,
+  preferWinding = true,
+  options = {},
+) {
+  if (!Array.isArray(candidates) || !candidates.length) {
+    throw new RangeError("At least one route candidate is required.");
+  }
+  if (!preferWinding || candidates.length === 1) {
+    return {
+      candidate: candidates[0],
+      styleLabel: "Direct",
+      score: null,
+      rankingNotice: null,
+    };
+  }
+
+  const ranked = rankWindingRoutes(candidates, options);
+  const maxAutoDetourRatio = Number.isFinite(options.maxAutoDetourRatio)
+    ? options.maxAutoDetourRatio
+    : MAX_AUTOMATIC_DESTINATION_DETOUR_RATIO;
+  const best =
+    ranked.find((candidate) => candidate.detourRatio <= maxAutoDetourRatio) ||
+    ranked.find((candidate) => candidate.candidate === candidates[0]) ||
+    ranked[0];
+  return {
+    candidate: best.candidate,
+    styleLabel: "Winding pick",
+    score: best.score,
+    rankingNotice: WINDING_ROUTE_RANKING_NOTICE,
+  };
+}
+
+export function buildRoutePlan(
+  name,
+  candidates,
+  profileId,
+  preferWinding,
+  metadata = {},
+) {
+  const geometricCandidates = candidates.filter(
+    (candidate) =>
+      Array.isArray(candidate?.coordinates) && candidate.coordinates.length >= 8,
+  );
+  if (!geometricCandidates.length) {
+    throw new Error("No route candidate had enough geometry to preview.");
+  }
+
+  const rankingOptions = Number.isFinite(metadata.targetDistanceMeters)
+    ? {
+        referenceDistanceMeters: metadata.targetDistanceMeters,
+        targetDistanceMeters: metadata.targetDistanceMeters,
+      }
+    : {};
+  const initialRanking = rankWindingRoutes(geometricCandidates, rankingOptions);
+  const usableCandidates =
+    metadata.routeKind === "round-trip"
+      ? initialRanking
+          .filter(
+            (candidate) =>
+              candidate.uTurnCount === 0 && candidate.loopArtifactCount <= 1,
+          )
+          .map((candidate) => candidate.candidate)
+      : geometricCandidates;
+  if (!usableCandidates.length) {
+    throw new Error(
+      "The loop candidates doubled back or crossed themselves. Try another length.",
+    );
+  }
+
+  const ranked = rankWindingRoutes(usableCandidates, rankingOptions);
+  const rankingByCandidate = new Map(
+    ranked.map((result) => [result.candidate, result]),
+  );
+  const selection = chooseRouteCandidate(usableCandidates, preferWinding, {
+    ...rankingOptions,
+    maxAutoDetourRatio:
+      metadata.routeKind === "round-trip"
+        ? Number.POSITIVE_INFINITY
+        : MAX_AUTOMATIC_DESTINATION_DETOUR_RATIO,
+  });
+  const plannedCandidates = usableCandidates.map((candidate, index) => {
+    const facts = rankingByCandidate.get(candidate);
+    const isSelected = candidate === selection.candidate;
+    const styleLabel =
+      metadata.routeKind === "round-trip"
+        ? isSelected
+          ? "Winding loop"
+          : `Loop option ${index + 1}`
+        : isSelected && preferWinding && usableCandidates.length > 1
+          ? "Winding pick"
+          : index === 0
+            ? "Direct"
+            : `Alternative ${index}`;
+    const route = buildRoute(name, candidate, profileId, {
+      ...metadata,
+      styleLabel,
+      windingScore: facts?.score ?? null,
+      rankingNotice:
+        usableCandidates.length > 1 ? WINDING_ROUTE_RANKING_NOTICE : null,
+      candidateCount: usableCandidates.length,
+    });
+    return {
+      id: String(candidate.id || `candidate-${index}`),
+      route,
+      label: styleLabel,
+      rank: facts?.rank ?? index + 1,
+      score: facts?.score ?? null,
+      detourRatio: facts?.detourRatio ?? 1,
+    };
+  });
+  const selected = plannedCandidates[usableCandidates.indexOf(selection.candidate)];
+
+  return {
+    status: "ready",
+    candidates: plannedCandidates,
+    selectedId: selected?.id || plannedCandidates[0].id,
+    notice:
+      usableCandidates.length > 1
+        ? WINDING_ROUTE_RANKING_NOTICE
+        : "Only one practical route was returned by the provider.",
+    error: null,
+  };
+}
+
+export function canCompleteRoute({
+  routeKind = "destination",
+  progressMeters,
+  routeLengthMeters,
+  distanceToEndMeters,
+  reacquired = false,
+  confirmedHighWaterMeters = 0,
+}) {
+  if (
+    reacquired ||
+    !Number.isFinite(routeLengthMeters) ||
+    routeLengthMeters <= 0 ||
+    !Number.isFinite(progressMeters) ||
+    !Number.isFinite(distanceToEndMeters)
+  ) {
+    return false;
+  }
+  if (
+    progressMeters < Math.max(0, routeLengthMeters - 35) ||
+    distanceToEndMeters >= COMPLETE_DISTANCE_METERS
+  ) {
+    return false;
+  }
+  return (
+    routeKind !== "round-trip" ||
+    confirmedHighWaterMeters >= routeLengthMeters * ROUND_TRIP_COMPLETION_RATIO
+  );
+}
+
+export function shouldHoldRoundTripReacquisition({
+  routeKind = "destination",
+  reacquired = false,
+  distanceToEndMeters,
+  confirmedHighWaterMeters = 0,
+  routeLengthMeters,
+}) {
+  return (
+    routeKind === "round-trip" &&
+    reacquired &&
+    Number.isFinite(routeLengthMeters) &&
+    routeLengthMeters > 0 &&
+    Number.isFinite(distanceToEndMeters) &&
+    distanceToEndMeters < COMPLETE_DISTANCE_METERS &&
+    confirmedHighWaterMeters < routeLengthMeters * ROUND_TRIP_COMPLETION_RATIO
+  );
+}
+
+function selectedRouteFromPlan(plan) {
+  return (
+    plan.candidates.find((candidate) => candidate.id === plan.selectedId)?.route ||
+    plan.candidates[0]?.route
+  );
 }
 
 export function materializeCurves(curves, profileId) {
