@@ -1,6 +1,6 @@
 export const createEmptyRoute = () => ({
   loaded: false,
-  name: '',
+  name: "",
   coordinates: [],
   cumulativeDistances: [],
   distanceMeters: 0,
@@ -9,12 +9,17 @@ export const createEmptyRoute = () => ({
   remainingCurves: [],
   endPoint: null,
   closestIndex: 0,
+  segmentIndex: 0,
+  progressMeters: 0,
 });
 
-export const createInitialState = ({ hasSavedToken = false, maskedToken = '' } = {}) => ({
+export const createInitialState = ({
+  hasSavedToken = false,
+  maskedToken = "",
+} = {}) => ({
   initialized: false,
   mapReady: false,
-  mode: 'idle',
+  mode: "idle",
   busy: false,
   soundEnabled: true,
   wakeLockActive: false,
@@ -25,7 +30,11 @@ export const createInitialState = ({ hasSavedToken = false, maskedToken = '' } =
     speedMph: 0,
     heading: null,
     accuracyMeters: null,
+    timestamp: null,
     offRoute: false,
+    gpsUsable: false,
+    gpsStatus: null,
+    routeDistanceMeters: null,
   },
   route: createEmptyRoute(),
   session: {
@@ -59,9 +68,10 @@ export class Store {
   }
 
   update(updater) {
-    const nextState = typeof updater === 'function'
-      ? updater(this.#state)
-      : { ...this.#state, ...updater };
+    const nextState =
+      typeof updater === "function"
+        ? updater(this.#state)
+        : { ...this.#state, ...updater };
 
     if (!nextState || nextState === this.#state) return;
     this.#state = nextState;

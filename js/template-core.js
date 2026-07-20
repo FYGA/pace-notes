@@ -1,4 +1,4 @@
-export const CORE_TEMPLATE=String.raw`<div aria-label="Route map" class="map" id="map"></div>
+export const CORE_TEMPLATE = String.raw`<div aria-label="Route map" class="map" id="map"></div>
 <div aria-hidden="true" class="approach-glow" id="approach-glow"></div>
 <header class="topbar">
 <div aria-label="Pace Notes" class="brand-chip">
@@ -16,9 +16,9 @@ export const CORE_TEMPLATE=String.raw`<div aria-label="Route map" class="map" id
 </div>
 </div>
 </header>
-<section aria-live="polite" class="pace-card">
+<section class="pace-card">
 <div class="pace-distance" id="distance-to-call">—</div>
-<div class="pace-call" id="call-text">Load a route to begin</div>
+<div aria-atomic="true" aria-live="polite" class="pace-call" id="call-text" role="status">Load a route to begin</div>
 <div class="pace-description" id="call-description">Destination-based rally-style guidance</div>
 <div aria-label="Upcoming pace notes" class="upcoming-strip" id="upcoming-strip"></div>
 </section>

@@ -1,4 +1,4 @@
-import { distanceMeters } from './utils.js';
+import { distanceMeters } from "./utils.js";
 
 const METERS_TO_MILES = 0.000621371;
 
@@ -8,6 +8,8 @@ export class SessionTracker {
   #topSpeedMph = 0;
   #turns = 0;
   #lastPosition = null;
+  #lastTimestamp = null;
+  #stoppedSnapshot = null;
 
   get active() {
     return this.#startedAt !== null;
@@ -19,27 +21,45 @@ export class SessionTracker {
     this.#topSpeedMph = 0;
     this.#turns = 0;
     this.#lastPosition = null;
+    this.#lastTimestamp = null;
+    this.#stoppedSnapshot = null;
   }
 
   stop() {
     const snapshot = this.snapshot();
     this.#startedAt = null;
     this.#lastPosition = null;
+    this.#lastTimestamp = null;
+    this.#stoppedSnapshot = { ...snapshot, active: false };
     return snapshot;
   }
 
-  update(position, speedMph) {
+  update(
+    position,
+    speedMph,
+    { timestamp = Date.now(), accuracyMeters = null } = {},
+  ) {
     if (!this.active || !position) return this.snapshot();
 
-    if (this.#lastPosition) {
+    const accurate = !Number.isFinite(accuracyMeters) || accuracyMeters <= 50;
+    if (this.#lastPosition && accurate) {
       const segmentMeters = distanceMeters(this.#lastPosition, position);
-      if (segmentMeters >= 0.5 && segmentMeters <= 120) {
+      const elapsedSeconds = this.#lastTimestamp
+        ? Math.max(0, (timestamp - this.#lastTimestamp) / 1000)
+        : 0;
+      const plausibleLimit =
+        elapsedSeconds > 0 ? Math.max(40, elapsedSeconds * 90) : 120;
+      if (segmentMeters >= 0.5 && segmentMeters <= plausibleLimit) {
         this.#distanceMiles += segmentMeters * METERS_TO_MILES;
       }
     }
 
     this.#lastPosition = [...position];
-    this.#topSpeedMph = Math.max(this.#topSpeedMph, Number(speedMph) || 0);
+    this.#lastTimestamp = timestamp;
+    const candidateSpeed = Number(speedMph) || 0;
+    if (accurate && candidateSpeed >= 0 && candidateSpeed <= 220) {
+      this.#topSpeedMph = Math.max(this.#topSpeedMph, candidateSpeed);
+    }
     return this.snapshot();
   }
 
@@ -49,6 +69,8 @@ export class SessionTracker {
   }
 
   snapshot() {
+    if (!this.active && this.#stoppedSnapshot)
+      return { ...this.#stoppedSnapshot };
     return {
       active: this.active,
       distanceMiles: this.#distanceMiles,
@@ -61,6 +83,7 @@ export class SessionTracker {
 
 export class WakeLockService {
   #sentinel = null;
+  #requestPromise = null;
   #onChange = null;
 
   constructor(onChange = () => {}) {
@@ -68,29 +91,42 @@ export class WakeLockService {
   }
 
   async request() {
-    if (!('wakeLock' in navigator)) return false;
+    if (!("wakeLock" in navigator)) return false;
+    if (this.#sentinel) return true;
+    if (this.#requestPromise) return this.#requestPromise;
 
-    try {
-      this.#sentinel = await navigator.wakeLock.request('screen');
-      this.#onChange(true);
-      this.#sentinel.addEventListener('release', () => {
-        this.#sentinel = null;
+    this.#requestPromise = (async () => {
+      try {
+        const sentinel = await navigator.wakeLock.request("screen");
+        this.#sentinel = sentinel;
+        this.#onChange(true);
+        sentinel.addEventListener("release", () => {
+          if (this.#sentinel !== sentinel) return;
+          this.#sentinel = null;
+          this.#onChange(false);
+        });
+        return true;
+      } catch {
         this.#onChange(false);
-      });
-      return true;
-    } catch {
-      this.#onChange(false);
-      return false;
-    }
+        return false;
+      } finally {
+        this.#requestPromise = null;
+      }
+    })();
+    return this.#requestPromise;
   }
 
   async release() {
+    if (this.#requestPromise) await this.#requestPromise;
     if (!this.#sentinel) return;
+    const sentinel = this.#sentinel;
     try {
-      await this.#sentinel.release();
+      await sentinel.release();
     } finally {
-      this.#sentinel = null;
-      this.#onChange(false);
+      if (this.#sentinel === sentinel) {
+        this.#sentinel = null;
+        this.#onChange(false);
+      }
     }
   }
 }

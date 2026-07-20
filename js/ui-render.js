@@ -1,1 +1,176 @@
-import{SEVERITY_COLORS as t}from"./curves.js";import{compassDirection as e,formatDuration as o,formatElapsed as n}from"./utils.js";export function renderState(s,i){s.app.dataset.mode=i.mode,s.settingsPanel.classList.toggle("is-hidden",!i.ui.settingsOpen),s.routePanel.classList.toggle("is-hidden",!i.ui.routeOpen);const a=i.hasSavedToken&&!i.ui.showTokenInput;s.savedTokenView.classList.toggle("is-hidden",!a),s.tokenForm.classList.toggle("is-hidden",a),s.maskedToken.textContent=i.maskedToken,s.routeSummary.classList.toggle("is-hidden",!i.route.loaded),s.routeName.textContent=i.route.name||"Destination",s.routeDistance.textContent=i.route.loaded?`${(i.route.distanceMeters/1609.344).toFixed(1)} mi`:"—",s.routeDuration.textContent=i.route.loaded?o(i.route.durationSeconds):"—",s.routeCurves.textContent=i.route.loaded?String(i.route.curves.length):"—",function(t,e){const o="tracking"===e.mode,n="demo"===e.mode,s="loading-demo"===e.mode;t.startButton.disabled=!e.route.loaded||e.busy||n,t.startButton.classList.toggle("button--primary",!o),t.startButton.classList.toggle("button--danger",o),t.startButton.querySelector(".button-icon").textContent=o?"■":"▶",t.startButton.querySelector(".button-label").textContent=o?"Stop":"Start",t.demoButton.disabled=!e.initialized||e.busy&&!s,t.demoButton.querySelector(".button-icon").textContent=n?"■":"◆",t.demoButton.querySelector(".button-label").textContent=s?"Loading…":n?"Stop demo":"Demo",t.routeButton.disabled=!e.initialized||e.busy,t.settingsButton.disabled=e.busy,t.centerButton.disabled=!e.telemetry.position,t.recordButton.disabled=!o&&!n,t.recordButton.classList.toggle("is-recording",e.recording.active),t.centerButton.classList.toggle("is-active",e.ui.followUser),t.soundButton.classList.toggle("is-active",e.soundEnabled),t.soundButton.textContent=e.soundEnabled?"◖))":"◖×"}(s,i),function(t,o){t.speed.textContent=String(Math.round(o.telemetry.speedMph||0)),t.heading.textContent=e(o.telemetry.heading),t.curves.textContent=String(o.route.remainingCurves.length)}(s,i),function(t,e){const o=e.route.remainingCurves[0];t.callText.className="pace-call",o?(t.distance.textContent=`${Math.max(0,Math.round(o.distance))}m`,t.callText.textContent=o.call,t.callText.classList.add(`severity-${o.severity}`),t.callDescription.textContent=o.description):e.busy&&"loading-route"===e.mode?(t.distance.textContent="…",t.callText.textContent="Building pace notes",t.callDescription.textContent="Calculating the route and analyzing road geometry"):e.route.loaded?(t.distance.textContent="—",t.callText.textContent="Clear road ahead",t.callDescription.textContent=e.telemetry.offRoute?"You appear to be off the loaded route":e.route.name):(t.distance.textContent="—",t.callText.textContent="Load a route to begin",t.callDescription.textContent="Destination-based rally-style guidance");const n=e.route.remainingCurves.slice(0,4).map(t=>{const e=document.createElement("div");e.className="upcoming-note";const o=document.createElement("span");o.className="upcoming-note__distance",o.textContent=`${Math.max(0,Math.round(t.distance))} m`;const n=document.createElement("span");return n.className=`upcoming-note__call severity-${t.severity}`,n.textContent=t.call,e.append(o,n),e});t.upcoming.replaceChildren(...n)}(s,i),function(t,e){t.sessionPanel.classList.toggle("is-hidden",!e.session.active),t.sessionDistance.textContent=`${e.session.distanceMiles.toFixed(1)} mi`,t.sessionTime.textContent=n(e.session.elapsedMs),t.sessionTurns.textContent=String(e.session.turns),t.sessionTopSpeed.textContent=`${Math.round(e.session.topSpeedMph)} mph`}(s,i),function(t,e){const o="tracking"===e.mode||"demo"===e.mode;if(t.gpsChip.classList.toggle("is-hidden",!o),t.wakeChip.classList.toggle("is-hidden",!e.wakeLockActive),!o)return;if("demo"===e.mode)return t.gpsText.textContent="DEMO",void(t.gpsDot.className="status-dot");const n=e.telemetry.accuracyMeters;t.gpsText.textContent=Number.isFinite(n)?`±${Math.round(n)}m`:"GPS",t.gpsDot.className="status-dot",n>=30?t.gpsDot.classList.add("is-poor"):n>=12&&t.gpsDot.classList.add("is-medium")}(s,i),function(e,o){const n=o.route.remainingCurves[0];if(!n||n.distance<=0||n.distance>=150||n.severity>5)return e.approachGlow.style.opacity="0",void e.approachGlow.removeAttribute("data-direction");const s=.72*Math.max(0,1-n.distance/150);e.approachGlow.dataset.direction=n.direction,e.approachGlow.style.setProperty("--glow-color",t[n.severity]),e.approachGlow.style.opacity=s.toFixed(2)}(s,i)}
+import { SEVERITY_COLORS as t } from "./curves.js";
+import {
+  compassDirection as e,
+  formatDuration as o,
+  formatElapsed as n,
+} from "./utils.js";
+export function renderState(s, i) {
+  ((s.app.dataset.mode = i.mode),
+    s.settingsPanel.classList.toggle("is-hidden", !i.ui.settingsOpen),
+    s.routePanel.classList.toggle("is-hidden", !i.ui.routeOpen));
+  const a = i.hasSavedToken && !i.ui.showTokenInput;
+  (s.savedTokenView.classList.toggle("is-hidden", !a),
+    s.tokenForm.classList.toggle("is-hidden", a),
+    (s.maskedToken.textContent = i.maskedToken),
+    s.routeSummary.classList.toggle("is-hidden", !i.route.loaded),
+    (s.routeName.textContent = i.route.name || "Destination"),
+    (s.routeDistance.textContent = i.route.loaded
+      ? `${(i.route.distanceMeters / 1609.344).toFixed(1)} mi`
+      : "—"),
+    (s.routeDuration.textContent = i.route.loaded
+      ? o(i.route.durationSeconds)
+      : "—"),
+    (s.routeCurves.textContent = i.route.loaded
+      ? String(i.route.curves.length)
+      : "—"),
+    (function (t, e) {
+      const o = "tracking" === e.mode,
+        n = "demo" === e.mode,
+        s = "loading-demo" === e.mode;
+      ((t.startDrivingButton.disabled = !e.route.loaded || e.busy || o || n),
+        (t.connectMapButton.disabled = e.busy),
+        (t.useSavedTokenButton.disabled = e.busy),
+        (t.changeTokenButton.disabled = e.busy),
+        (t.tokenInput.disabled = e.busy),
+        (t.loadRouteButton.disabled = e.busy),
+        (t.startButton.disabled = !e.route.loaded || e.busy || n),
+        t.startButton.classList.toggle("button--primary", !o),
+        t.startButton.classList.toggle("button--danger", o),
+        (t.startButton.querySelector(".button-icon").textContent = o
+          ? "■"
+          : "▶"),
+        (t.startButton.querySelector(".button-label").textContent = o
+          ? "Stop"
+          : "Start"),
+        (t.demoButton.disabled = !e.initialized || (e.busy && !s)),
+        (t.demoButton.querySelector(".button-icon").textContent = n
+          ? "■"
+          : "◆"),
+        (t.demoButton.querySelector(".button-label").textContent = s
+          ? "Loading…"
+          : n
+            ? "Stop demo"
+            : "Demo"),
+        (t.routeButton.disabled = !e.initialized || e.busy),
+        (t.settingsButton.disabled = e.busy),
+        (t.centerButton.disabled = !e.telemetry.position),
+        (t.recordButton.disabled = !o && !n),
+        t.recordButton.classList.toggle("is-recording", e.recording.active),
+        t.centerButton.classList.toggle("is-active", e.ui.followUser),
+        t.soundButton.classList.toggle("is-active", e.soundEnabled),
+        t.recordButton.setAttribute("aria-pressed", String(e.recording.active)),
+        t.centerButton.setAttribute("aria-pressed", String(e.ui.followUser)),
+        t.soundButton.setAttribute("aria-pressed", String(e.soundEnabled)),
+        (t.soundButton.textContent = e.soundEnabled ? "◖))" : "◖×"));
+    })(s, i),
+    (function (t, o) {
+      ((t.speed.textContent = String(Math.round(o.telemetry.speedMph || 0))),
+        (t.heading.textContent = e(o.telemetry.heading)),
+        (t.curves.textContent = String(o.route.remainingCurves.length)));
+    })(s, i),
+    (function (t, e) {
+      const o = e.route.remainingCurves[0];
+      const n = "tracking" === e.mode && !e.telemetry.gpsUsable;
+      ((t.callText.className = "pace-call"),
+        e.telemetry.offRoute
+          ? ((t.distance.textContent = "!"),
+            (t.callText.textContent = "Off route"),
+            (t.callDescription.textContent =
+              "Pace notes paused until the route match is reliable"))
+          : n
+            ? ((t.distance.textContent = "—"),
+              (t.callText.textContent = "GPS uncertain"),
+              (t.callDescription.textContent =
+                e.telemetry.gpsStatus || "Pace notes paused"))
+            : o
+              ? ((t.distance.textContent = `${Math.max(0, Math.round(o.distance))}m`),
+                (t.callText.textContent = o.call),
+                t.callText.classList.add(`severity-${o.severity}`),
+                (t.callDescription.textContent = `Generated geometry draft · ${o.description}`))
+              : e.busy && "loading-route" === e.mode
+                ? ((t.distance.textContent = "…"),
+                  (t.callText.textContent = "Building pace notes"),
+                  (t.callDescription.textContent =
+                    "Calculating the route and analyzing road geometry"))
+                : e.route.loaded
+                  ? ((t.distance.textContent = "—"),
+                    (t.callText.textContent = "Clear road ahead"),
+                    (t.callDescription.textContent = e.telemetry.offRoute
+                      ? "You appear to be off the loaded route"
+                      : e.route.name))
+                  : ((t.distance.textContent = "—"),
+                    (t.callText.textContent = "Load a route to begin"),
+                    (t.callDescription.textContent =
+                      "Destination-based rally-style guidance")));
+      const upcomingNotes = e.route.remainingCurves.slice(0, 4).map((t) => {
+        const e = document.createElement("div");
+        e.className = "upcoming-note";
+        const o = document.createElement("span");
+        ((o.className = "upcoming-note__distance"),
+          (o.textContent = `${Math.max(0, Math.round(t.distance))} m`));
+        const n = document.createElement("span");
+        return (
+          (n.className = `upcoming-note__call severity-${t.severity}`),
+          (n.textContent = t.call),
+          e.append(o, n),
+          e
+        );
+      });
+      t.upcoming.replaceChildren(...upcomingNotes);
+    })(s, i),
+    (function (t, e) {
+      const showCompleted =
+        e.telemetry.gpsStatus === "Route complete" && e.session.elapsedMs > 0;
+      (t.sessionPanel.classList.toggle(
+        "is-hidden",
+        !e.session.active && !showCompleted,
+      ),
+        (t.sessionDistance.textContent = `${e.session.distanceMiles.toFixed(1)} mi`),
+        (t.sessionTime.textContent = n(e.session.elapsedMs)),
+        (t.sessionTurns.textContent = String(e.session.turns)),
+        (t.sessionTopSpeed.textContent = `${Math.round(e.session.topSpeedMph)} mph`));
+    })(s, i),
+    (function (t, e) {
+      const o = "tracking" === e.mode || "demo" === e.mode;
+      if (
+        (t.gpsChip.classList.toggle("is-hidden", !o),
+        t.wakeChip.classList.toggle("is-hidden", !e.wakeLockActive),
+        !o)
+      )
+        return;
+      if ("demo" === e.mode)
+        return (
+          (t.gpsText.textContent = "DEMO"),
+          void (t.gpsDot.className = "status-dot")
+        );
+      const n = e.telemetry.accuracyMeters;
+      ((t.gpsText.textContent = Number.isFinite(n)
+        ? `±${Math.round(n)}m`
+        : "GPS"),
+        (t.gpsDot.className = "status-dot"),
+        !e.telemetry.gpsUsable
+          ? t.gpsDot.classList.add("is-poor")
+          : n >= 30
+            ? t.gpsDot.classList.add("is-poor")
+            : n >= 12 && t.gpsDot.classList.add("is-medium"));
+    })(s, i),
+    (function (e, o) {
+      const n = o.route.remainingCurves[0];
+      if (
+        o.telemetry.offRoute ||
+        ("tracking" === o.mode && !o.telemetry.gpsUsable) ||
+        !n ||
+        n.distance <= 0 ||
+        n.distance >= 150 ||
+        n.severity > 5
+      )
+        return (
+          (e.approachGlow.style.opacity = "0"),
+          void e.approachGlow.removeAttribute("data-direction")
+        );
+      const s = 0.72 * Math.max(0, 1 - n.distance / 150);
+      ((e.approachGlow.dataset.direction = n.direction),
+        e.approachGlow.style.setProperty("--glow-color", t[n.severity]),
+        (e.approachGlow.style.opacity = s.toFixed(2)));
+    })(s, i));
+}
