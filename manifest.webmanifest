@@ -1,0 +1,27 @@
+{
+  "id": "./",
+  "name": "Pace Notes",
+  "short_name": "Pace Notes",
+  "description": "A route companion for geometry-only pace-note drafts and winding-road discovery.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#090b10",
+  "theme_color": "#090b10",
+  "categories": ["navigation", "sports"],
+  "icons": [
+    {
+      "src": "icons/pacenotes-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/pacenotes-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

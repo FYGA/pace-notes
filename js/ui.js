@@ -89,6 +89,31 @@ export class AppView {
       if (event.target === elements.routePanel) actions.onCloseRoute();
     });
     elements.startDrivingButton.addEventListener("click", actions.onStartDriving);
+    elements.reviewRouteButton.addEventListener("click", actions.onOpenRecce);
+    elements.closeRecceButton.addEventListener("click", actions.onCloseRecce);
+    elements.reccePanel.addEventListener("click", (event) => {
+      if (event.target === elements.reccePanel) actions.onCloseRecce();
+    });
+    elements.recceNoteSelect.addEventListener("change", () => {
+      actions.onSelectRecceNote(elements.recceNoteSelect.value);
+    });
+    elements.recceForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      actions.onSaveRecceNote({
+        noteId: elements.recceNoteSelect.value,
+        direction: elements.recceDirection.value,
+        severity: Number(elements.recceSeverity.value),
+        shape: elements.recceShape.value,
+        manualAnnotation: elements.recceAnnotation.value.trim(),
+        reviewed: elements.recceReviewed.checked,
+      });
+    });
+    elements.recceShape.addEventListener("change", () => {
+      elements.recceSeverity.disabled = elements.recceShape.value !== "normal";
+    });
+    elements.revertRecceButton.addEventListener("click", () => {
+      actions.onRevertRecceNote(elements.recceNoteSelect.value);
+    });
     elements.startButton.addEventListener("click", actions.onToggleTracking);
     elements.demoButton.addEventListener("click", actions.onToggleDemo);
     elements.routeButton.addEventListener("click", actions.onOpenRoute);
@@ -100,7 +125,9 @@ export class AppView {
       passive: true,
     });
     document.addEventListener("keydown", (event) => {
-      const panel = !elements.settingsPanel.classList.contains("is-hidden")
+      const panel = !elements.reccePanel.classList.contains("is-hidden")
+        ? elements.reccePanel
+        : !elements.settingsPanel.classList.contains("is-hidden")
         ? elements.settingsPanel
         : !elements.routePanel.classList.contains("is-hidden")
           ? elements.routePanel
@@ -108,6 +135,7 @@ export class AppView {
       if (!panel) return;
       if (event.key === "Escape") {
         if (panel === elements.settingsPanel) actions.onCloseSettings();
+        else if (panel === elements.reccePanel) actions.onCloseRecce();
         else actions.onCloseRoute();
         return;
       }
@@ -164,6 +192,14 @@ export class AppView {
 
   focusRouteButton() {
     this.#elements.routeButton.focus();
+  }
+
+  focusRecce() {
+    setTimeout(() => this.#elements.recceNoteSelect.focus(), 40);
+  }
+
+  focusReviewRoute() {
+    setTimeout(() => this.#elements.reviewRouteButton.focus(), 40);
   }
 
   focusSettingsButton() {

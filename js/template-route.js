@@ -45,7 +45,10 @@ export const ROUTE_TEMPLATE = String.raw`<section aria-labelledby="route-title" 
 <div><strong id="route-curves">—</strong><span>Curves</span></div>
 <div><strong id="route-style">—</strong><span>Route</span></div>
 </div>
-<button class="button button--primary button--full" id="start-driving-btn" type="button">Start driving</button>
+<div class="route-summary__actions">
+<button class="button button--ghost" id="review-route-btn" type="button">Review notes</button>
+<button class="button button--primary" id="start-driving-btn" type="button">Start driving</button>
+</div>
 </div>
 </div>
 </section>

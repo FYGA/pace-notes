@@ -99,6 +99,7 @@ test("recording schema v3 adds provenance while preserving legacy note fields", 
       id: "curve-100-R",
       position: [1, 2],
       call: "right open long tightens tight",
+      generatedCall: "right medium",
       severity: 4,
       direction: "R",
       angle: 80,
@@ -110,7 +111,16 @@ test("recording schema v3 adds provenance while preserving legacy note fields", 
       shape: "normal",
       modifiers,
       source: "route-geometry",
-      verified: false,
+      verified: true,
+      reviewed: true,
+      reviewSource: "manual-recce",
+      reviewStatus: "reviewed",
+      manualReview: {
+        source: "manual-recce",
+        fields: ["severity"],
+        changes: { severity: 4 },
+      },
+      manualAnnotations: [{ text: "keep in", source: "manual" }],
       profileId: "descriptive",
     },
     "right open long tightens tight",
@@ -143,6 +153,15 @@ test("recording schema v3 adds provenance while preserving legacy note fields", 
   assert.equal(note.entryDistanceMeters, 100);
   assert.equal(note.announcementGroupId, "group-1");
   assert.deepEqual(note.modifiers, ["long", "tightens"]);
+  assert.equal(note.reviewSource, "manual-recce");
+  assert.equal(note.reviewStatus, "reviewed");
+  assert.equal(note.reviewed, true);
+  assert.equal(note.generatedCall, "right medium");
+  assert.deepEqual(note.manualReview.fields, ["severity"]);
+  assert.deepEqual(note.manualReview.changes, { severity: 4 });
+  assert.deepEqual(note.manualAnnotations, [
+    { text: "keep in", source: "manual" },
+  ]);
 });
 
 test("wake-lock requests are shared and release the matching sentinel", async () => {

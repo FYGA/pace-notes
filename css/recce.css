@@ -1,0 +1,105 @@
+.modal-card--recce {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(245, 189, 69, 0.11), transparent 34%),
+    var(--panel-solid);
+}
+
+.recce-progress {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 11px 12px;
+  border: 1px solid rgba(245, 189, 69, 0.2);
+  border-radius: 13px;
+  background: rgba(245, 189, 69, 0.06);
+}
+
+.recce-progress strong,
+.recce-progress span {
+  font-size: 12px;
+}
+
+.recce-progress span,
+.recce-field > span,
+.recce-generated span {
+  color: var(--muted);
+}
+
+.recce-field,
+.recce-form {
+  display: grid;
+  gap: 7px;
+}
+
+.recce-field > span,
+.recce-generated span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.45px;
+  text-transform: uppercase;
+}
+
+.recce-field select,
+.recce-field input {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(5, 7, 11, 0.58);
+  color: var(--text);
+  padding: 0 12px;
+  font: inherit;
+}
+
+.recce-generated {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 11px 12px;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.recce-form {
+  gap: 12px;
+}
+
+.recce-form__row,
+.recce-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.recce-reviewed {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 44px;
+  padding: 5px 0;
+  color: #d0d5dd;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.recce-reviewed input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.route-summary__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 360px) {
+  .recce-form__row,
+  .recce-actions,
+  .route-summary__actions {
+    grid-template-columns: 1fr;
+  }
+}

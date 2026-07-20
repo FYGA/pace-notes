@@ -54,6 +54,7 @@ export class Recorder {
     this.#notes.push({
       position: [...curve.position],
       call: curve.call,
+      generatedCall: curve.generatedCall ?? curve.call,
       spoken: spokenText,
       severity: curve.severity,
       direction: curve.direction,
@@ -67,6 +68,11 @@ export class Recorder {
       profileId: curve.profileId ?? this.#paceNoteSystem.profileId,
       source: curve.source ?? "route-geometry",
       verified: curve.verified === true,
+      reviewed: curve.reviewed === true,
+      reviewSource: curve.reviewSource ?? null,
+      reviewStatus: curve.reviewStatus ?? null,
+      manualReview: cloneValue(curve.manualReview ?? null),
+      manualAnnotations: cloneValue(curve.manualAnnotations ?? []),
       distanceFromStart: curve.distanceFromStart,
       entryDistanceMeters:
         curve.entryDistanceMeters ?? curve.startDistance ?? curve.distanceFromStart,
