@@ -2,12 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  applyReviewLayerToRoute,
   buildRoutePlan,
+  buildRecceChanges,
   canCompleteRoute,
   chooseRouteCandidate,
   materializeCurves,
   shouldHoldRoundTripReacquisition,
 } from "../js/app.js";
+import {
+  createRecceReviewLayer,
+  setRecceOverride,
+} from "../js/recce.js";
 
 function detectedCurve(overrides = {}) {
   return {
@@ -166,6 +172,71 @@ test("round trips cannot complete from a start-end reacquisition", () => {
     }),
     true,
   );
+});
+
+test("recce edits rederive from base geometry and survive profile changes", () => {
+  const baseCurve = detectedCurve({ radiusMeters: 70 });
+  const curves = materializeCurves([baseCurve], "numerical");
+  const route = {
+    loaded: true,
+    profileId: "numerical",
+    baseCurves: [baseCurve],
+    curves,
+    remainingCurves: curves.map((curve) => ({
+      ...curve,
+      distance: 100,
+      callState: "pending",
+    })),
+    reviewLayer: createRecceReviewLayer(),
+    noteOverrides: {},
+    reviewRevision: 0,
+  };
+  const review = {
+    noteId: baseCurve.id,
+    direction: "L",
+    severity: 2,
+    shape: "normal",
+    manualAnnotation: "keep in",
+  };
+  assert.deepEqual(buildRecceChanges(route, review), {
+    direction: "L",
+    severity: 2,
+    manualAnnotations: ["keep in"],
+  });
+
+  const layer = setRecceOverride(
+    route.reviewLayer,
+    baseCurve.id,
+    buildRecceChanges(route, review),
+  );
+  const numerical = applyReviewLayerToRoute(route, layer);
+  assert.equal(numerical.curves[0].call, "left 2, keep in");
+  assert.equal(numerical.curves[0].radiusMeters, 70);
+  assert.equal(numerical.curves[0].reviewSource, "manual-recce");
+  assert.equal(numerical.remainingCurves[0].callState, "pending");
+
+  const descriptive = applyReviewLayerToRoute(
+    { ...numerical, profileId: "descriptive" },
+    layer,
+  );
+  assert.equal(descriptive.curves[0].call, "left tight, keep in");
+  assert.equal(descriptive.reviewRevision, 2);
+
+  const hairpinChanges = buildRecceChanges(route, {
+    ...review,
+    direction: "R",
+    shape: "hairpin",
+    manualAnnotation: "",
+  });
+  assert.deepEqual(hairpinChanges, { shape: "hairpin", severity: 1 });
+  const hairpinLayer = setRecceOverride(
+    route.reviewLayer,
+    baseCurve.id,
+    hairpinChanges,
+  );
+  const hairpin = applyReviewLayerToRoute(route, hairpinLayer).curves[0];
+  assert.equal(hairpin.call, "right hairpin");
+  assert.equal(hairpin.severity, 1);
 });
 
 function routeCandidate(id, distanceMeters, latitudeAmplitude) {

@@ -14,7 +14,9 @@ https://nesloma.github.io/pace-notes/
 - Destination planning can compare provider alternatives and automatically choose a reasonably sized winding option.
 - Winding-loop discovery builds deterministic waypoint candidates around the current position, rejects obvious route artifacts, and ranks the remaining geometry near the requested length.
 - Route choices remain explicit previews until the driver selects one and starts tracking.
+- A parked recce editor lets the driver review, correct, annotate, or revert individual calls while preserving the generated geometry and manual provenance.
 - Routing is behind a provider-neutral interface; Mapbox is the current provider and can be replaced without coupling route planning to its response format.
+- The app is installable and its interface shell can reopen offline. Maps, geocoding, new routes, and live road information still require a network connection.
 - Curve, route-matching, scheduling, routing, session, recording, and winding logic are browser-independent and covered by Node tests.
 - Route progress uses cumulative distances and a hinted nearest-point search instead of repeatedly rescanning and resumming the whole route.
 - UI behavior is bound with event listeners; there are no inline handlers or inline styles.
@@ -51,6 +53,8 @@ The UI is smoke-tested at compact portrait and landscape phone sizes, including 
 - `js/map.js` — Mapbox rendering and camera behavior
 - `js/routing.js` — provider-neutral routing facade and Mapbox adapter
 - `js/winding.js` — route-geometry ranking and round-trip waypoint generation
+- `js/recce.js` — validated manual review layers and profile-safe call re-rendering
+- `js/pwa.js` / `sw.js` — install registration and credential-safe app-shell caching
 - `js/tracking.js` — browser geolocation adapter
 - `js/demo.js` — distance-based demo simulation
 - `js/audio.js` — speech, beep, and haptic feedback

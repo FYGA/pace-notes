@@ -10,6 +10,12 @@ import {
 import { MapController } from "./map.js";
 import { renderCornerCall, renderLinkedCall } from "./pacenotes.js";
 import { Recorder } from "./recording.js";
+import {
+  applyRecceOverridesToRoute,
+  createRecceReviewLayer,
+  revertRecceOverride,
+  setRecceOverride,
+} from "./recce.js";
 import { MapboxClient } from "./routing.js";
 import { SessionTracker, WakeLockService } from "./session.js";
 import {
@@ -103,6 +109,11 @@ export class PaceNotesApp {
         this.#selectRouteCandidate(candidateId),
       onCloseRoute: () => this.#closeRoute(),
       onStartDriving: () => this.#startSelectedRoute(),
+      onOpenRecce: () => this.#openRecce(),
+      onCloseRecce: () => this.#closeRecce(),
+      onSelectRecceNote: (noteId) => this.#selectRecceNote(noteId),
+      onSaveRecceNote: (review) => this.#saveRecceNote(review),
+      onRevertRecceNote: (noteId) => this.#revertRecceNote(noteId),
       onToggleTracking: () => this.#toggleTracking(),
       onToggleDemo: () => this.#toggleDemo(),
       onOpenRoute: () => this.#openRoute(),
@@ -495,7 +506,12 @@ export class PaceNotesApp {
     await this.#stopActiveMode();
     this.#store.update((state) => ({
       ...state,
-      ui: { ...state.ui, routeOpen: true, settingsOpen: false },
+      ui: {
+        ...state.ui,
+        routeOpen: true,
+        settingsOpen: false,
+        recceOpen: false,
+      },
     }));
     this.#view.focusDestination();
   }
@@ -531,6 +547,7 @@ export class PaceNotesApp {
 
   #startSelectedRoute() {
     const state = this.#store.getState();
+    if (state.ui.recceOpen) return;
     const selected = state.routePlan.candidates.find(
       (candidate) => candidate.id === state.routePlan.selectedId,
     );
@@ -554,6 +571,134 @@ export class PaceNotesApp {
     return this.#startTracking();
   }
 
+  #openRecce() {
+    const state = this.#store.getState();
+    const route = reviewTargetRoute(state);
+    if (state.busy || state.mode !== "idle" || !route?.curves.length) {
+      this.#view.showToast("Review notes while parked after a route is ready.", {
+        tone: "error",
+      });
+      return;
+    }
+    this.#store.update((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        settingsOpen: false,
+        routeOpen: false,
+        recceOpen: true,
+        recceReturnTo: "route",
+        recceNoteId: route.curves[0].id,
+      },
+    }));
+    this.#view.focusRecce();
+  }
+
+  #closeRecce() {
+    const state = this.#store.getState();
+    if (!state.ui.recceOpen) return;
+    this.#store.update((current) => ({
+      ...current,
+      ui: {
+        ...current.ui,
+        recceOpen: false,
+        routeOpen: current.ui.recceReturnTo === "route",
+      },
+    }));
+    this.#view.focusReviewRoute();
+  }
+
+  #selectRecceNote(noteId) {
+    const state = this.#store.getState();
+    const route = reviewTargetRoute(state);
+    if (!state.ui.recceOpen || !route?.curves.some((note) => note.id === noteId)) {
+      return;
+    }
+    this.#store.update((current) => ({
+      ...current,
+      ui: { ...current.ui, recceNoteId: noteId },
+    }));
+  }
+
+  #saveRecceNote(review) {
+    const state = this.#store.getState();
+    const route = reviewTargetRoute(state);
+    if (
+      !state.ui.recceOpen ||
+      state.busy ||
+      state.mode !== "idle" ||
+      !route?.curves.some((note) => note.id === review.noteId)
+    ) {
+      return;
+    }
+    if (!review.reviewed) {
+      this.#view.showToast("Confirm that you reviewed this call before saving.", {
+        tone: "error",
+      });
+      return;
+    }
+
+    try {
+      const reviewLayer = setRecceOverride(
+        route.reviewLayer || createRecceReviewLayer(),
+        review.noteId,
+        buildRecceChanges(route, review),
+        { reviewedAt: new Date().toISOString() },
+      );
+      const updatedRoute = applyReviewLayerToRoute(route, reviewLayer);
+      this.#commitReviewedRoute(state, updatedRoute);
+      this.#view.showToast("Reviewed pace note saved.", { tone: "success" });
+    } catch (error) {
+      this.#view.showToast(error.message || "Could not save that review.", {
+        tone: "error",
+      });
+    }
+  }
+
+  #revertRecceNote(noteId) {
+    const state = this.#store.getState();
+    const route = reviewTargetRoute(state);
+    if (!state.ui.recceOpen || state.mode !== "idle" || !route) return;
+    try {
+      const reviewLayer = revertRecceOverride(
+        route.reviewLayer || createRecceReviewLayer(),
+        noteId,
+      );
+      const updatedRoute = applyReviewLayerToRoute(route, reviewLayer);
+      this.#commitReviewedRoute(state, updatedRoute);
+      this.#view.showToast("Generated note restored.", { tone: "success" });
+    } catch (error) {
+      this.#view.showToast(error.message || "Could not revert that note.", {
+        tone: "error",
+      });
+    }
+  }
+
+  #commitReviewedRoute(state, updatedRoute) {
+    const selectedCandidate = state.routePlan.candidates.find(
+      (candidate) => candidate.id === state.routePlan.selectedId,
+    );
+    this.#map.setRoute(updatedRoute);
+    if (selectedCandidate) {
+      this.#store.update((current) => ({
+        ...current,
+        routePlan: {
+          ...current.routePlan,
+          candidates: current.routePlan.candidates.map((candidate) =>
+            candidate.id === selectedCandidate.id
+              ? { ...candidate, route: updatedRoute }
+              : candidate,
+          ),
+        },
+      }));
+      return;
+    }
+
+    this.#audio.clear();
+    this.#scheduler.reset(updatedRoute.curves);
+    this.#store.update((current) => ({ ...current, route: updatedRoute }));
+  }
+
   #openSettings() {
     const state = this.#store.getState();
     if (state.busy || state.mode !== "idle") {
@@ -566,6 +711,7 @@ export class PaceNotesApp {
         ...state.ui,
         settingsOpen: true,
         routeOpen: false,
+        recceOpen: false,
         showTokenInput: !state.hasSavedToken,
       },
     }));
@@ -589,6 +735,7 @@ export class PaceNotesApp {
   async #startTracking() {
     if (this.#stopPromise) await this.#stopPromise;
     const state = this.#store.getState();
+    if (state.ui.recceOpen) return;
     if (!state.route.loaded) {
       this.#view.showToast("Load a route first.", { tone: "error" });
       return;
@@ -1191,7 +1338,11 @@ export function buildRoute(
   metadata = {},
 ) {
   const cumulativeDistances = buildCumulativeDistances(result.coordinates);
-  const curves = materializeCurves(analyzeCurves(result.coordinates), profileId);
+  const baseCurves = analyzeCurves(result.coordinates);
+  const curves = materializeCurves(baseCurves, profileId).map((curve) => ({
+    ...curve,
+    generatedCall: curve.call,
+  }));
   return {
     loaded: true,
     name,
@@ -1199,7 +1350,11 @@ export function buildRoute(
     cumulativeDistances,
     distanceMeters: result.distanceMeters,
     durationSeconds: result.durationSeconds,
+    baseCurves,
     curves,
+    reviewLayer: createRecceReviewLayer(),
+    noteOverrides: {},
+    reviewRevision: 0,
     engineVersion: "geometry-v2",
     noteSchemaVersion: 2,
     profileId,
@@ -1454,10 +1609,19 @@ export function materializeCurves(curves, profileId) {
 }
 
 function rematerializeRoute(route, profileId) {
-  const curves = materializeCurves(route.curves, profileId);
+  const baseCurves = route.baseCurves || route.curves;
+  const generatedCurves = materializeCurves(baseCurves, profileId).map(
+    (curve) => ({ ...curve, generatedCall: curve.call }),
+  );
+  const reviewedRoute = applyRecceOverridesToRoute(
+    { ...route, curves: generatedCurves },
+    route.reviewLayer || createRecceReviewLayer(),
+    { profileId },
+  );
+  const curves = reviewedRoute.curves;
   const curvesById = new Map(curves.map((curve) => [curve.id, curve]));
   return {
-    ...route,
+    ...reviewedRoute,
     profileId,
     curves,
     remainingCurves: route.remainingCurves.map((curve) => ({
@@ -1466,6 +1630,65 @@ function rematerializeRoute(route, profileId) {
       callState: curve.callState,
     })),
   };
+}
+
+function reviewTargetRoute(state) {
+  return (
+    state.routePlan.candidates.find(
+      (candidate) => candidate.id === state.routePlan.selectedId,
+    )?.route || state.route
+  );
+}
+
+export function applyReviewLayerToRoute(route, reviewLayer) {
+  const profileId = route.profileId || "numerical";
+  const generatedCurves = materializeCurves(
+    route.baseCurves || route.curves,
+    profileId,
+  ).map((curve) => ({ ...curve, generatedCall: curve.call }));
+  const reviewed = applyRecceOverridesToRoute(
+    { ...route, curves: generatedCurves },
+    reviewLayer,
+    { profileId },
+  );
+  return {
+    ...reviewed,
+    reviewLayer,
+    noteOverrides: reviewLayer.overrides,
+    reviewRevision: (route.reviewRevision || 0) + 1,
+  };
+}
+
+export function buildRecceChanges(route, review) {
+  const profileId = route.profileId || "numerical";
+  const generated = materializeCurves(
+    route.baseCurves || route.curves,
+    profileId,
+  ).find((note) => note.id === review.noteId);
+  if (!generated) throw new Error("That pace note is no longer on this route.");
+
+  const changes = {};
+  if (review.direction !== generated.direction) {
+    changes.direction = review.direction;
+  }
+  const generatedShape = generated.shape || "normal";
+  if (review.shape !== generatedShape) changes.shape = review.shape;
+  const reviewedSeverity =
+    review.shape === "hairpin"
+      ? 1
+      : review.shape === "square"
+        ? 2
+        : Number(review.severity);
+  if (reviewedSeverity !== generated.severity) {
+    changes.severity = reviewedSeverity;
+  }
+  const existingChanges = route.reviewLayer?.overrides?.[review.noteId]?.changes;
+  if (review.manualAnnotation || existingChanges?.manualAnnotations) {
+    changes.manualAnnotations = review.manualAnnotation
+      ? [review.manualAnnotation]
+      : [];
+  }
+  return changes;
 }
 
 function resetRouteProgress(route) {

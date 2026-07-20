@@ -8,8 +8,14 @@ export function renderState(s, i) {
   ((s.app.dataset.mode = i.mode),
     s.settingsPanel.classList.toggle("is-hidden", !i.ui.settingsOpen),
     s.closeSettingsButton.classList.toggle("is-hidden", !i.initialized),
-    setBackgroundInert(s, i.ui.settingsOpen, i.ui.routeOpen),
-    s.routePanel.classList.toggle("is-hidden", !i.ui.routeOpen));
+    setBackgroundInert(
+      s,
+      i.ui.settingsOpen,
+      i.ui.routeOpen,
+      i.ui.recceOpen,
+    ),
+    s.routePanel.classList.toggle("is-hidden", !i.ui.routeOpen),
+    s.reccePanel.classList.toggle("is-hidden", !i.ui.recceOpen));
   const a = i.hasSavedToken && !i.ui.showTokenInput;
   const selectedPlanCandidate = i.routePlan.candidates.find(
     (candidate) => candidate.id === i.routePlan.selectedId,
@@ -38,6 +44,7 @@ export function renderState(s, i) {
       String(i.ui.routeMode === "loop"),
     ),
     renderRouteCandidates(s, i),
+    renderRecce(s, i, selectedPlanCandidate?.route || i.route),
     s.routeSummary.classList.toggle("is-hidden", !summaryRoute.loaded),
     (s.routeName.textContent = summaryRoute.name || "Destination"),
     (s.routeDistance.textContent = summaryRoute.loaded
@@ -58,6 +65,11 @@ export function renderState(s, i) {
         s = "loading-demo" === e.mode;
       ((t.startDrivingButton.disabled =
         (!e.route.loaded && !e.routePlan.selectedId) || e.busy || o || n),
+        (t.reviewRouteButton.disabled =
+          !summaryRoute.loaded ||
+          !summaryRoute.curves?.length ||
+          e.busy ||
+          e.mode !== "idle"),
         (t.connectMapButton.disabled = e.busy),
         (t.useSavedTokenButton.disabled = e.busy),
         (t.changeTokenButton.disabled = e.busy),
@@ -212,8 +224,10 @@ export function renderState(s, i) {
     })(s, i));
 }
 
-function setBackgroundInert(elements, settingsOpen, routeOpen) {
-  const activePanel = settingsOpen
+function setBackgroundInert(elements, settingsOpen, routeOpen, recceOpen) {
+  const activePanel = recceOpen
+    ? elements.reccePanel
+    : settingsOpen
     ? elements.settingsPanel
     : routeOpen
       ? elements.routePanel
@@ -224,6 +238,50 @@ function setBackgroundInert(elements, settingsOpen, routeOpen) {
       child.toggleAttribute("inert", Boolean(activePanel));
     }
   }
+}
+
+function renderRecce(elements, state, route) {
+  const notes = route?.loaded ? route.curves : [];
+  const selectedId = notes.some((note) => note.id === state.ui.recceNoteId)
+    ? state.ui.recceNoteId
+    : notes[0]?.id;
+  const selected = notes.find((note) => note.id === selectedId);
+  const overrides = route?.noteOverrides || {};
+  const options = notes.map((note, index) => {
+    const option = document.createElement("option");
+    option.value = note.id;
+    option.textContent = `${index + 1} · ${Math.round(note.entryDistanceMeters)}m · ${note.call}`;
+    option.selected = note.id === selectedId;
+    return option;
+  });
+  elements.recceNoteSelect.replaceChildren(...options);
+  elements.recceNoteSelect.disabled = !selected;
+  elements.recceForm.classList.toggle("is-hidden", !selected);
+  elements.recceGeneratedCall.textContent =
+    selected?.generatedCall || selected?.call || "—";
+  const reviewedCount = notes.filter((note) => note.reviewed === true).length;
+  elements.recceProgress.textContent = `${reviewedCount} of ${notes.length} reviewed`;
+  const editedCount = Object.values(overrides).filter(
+    (record) => Object.keys(record?.changes || {}).length > 0,
+  ).length;
+  elements.recceEdited.textContent = `${editedCount} edited`;
+  if (!selected) return;
+
+  const override = overrides[selected.id]?.changes || {};
+  elements.recceDirection.value = override.direction || selected.direction;
+  elements.recceSeverity.value = String(
+    override.severity ?? selected.severity,
+  );
+  elements.recceShape.value = override.shape || selected.shape || "normal";
+  elements.recceSeverity.disabled = elements.recceShape.value !== "normal";
+  elements.recceAnnotation.value =
+    override.manualAnnotations?.[0]?.text ||
+    override.manualAnnotations?.[0] ||
+    selected.manualAnnotations?.[0]?.text ||
+    selected.manualAnnotations?.[0] ||
+    "";
+  elements.recceReviewed.checked = selected.reviewed === true;
+  elements.revertRecceButton.disabled = !overrides[selected.id];
 }
 
 function renderRouteCandidates(elements, state) {

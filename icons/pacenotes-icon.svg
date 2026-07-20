@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Pace Notes app icon">
+  <defs>
+    <linearGradient id="bg" x1="72" y1="40" x2="440" y2="472" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#202936"/>
+      <stop offset="1" stop-color="#090b10"/>
+    </linearGradient>
+    <linearGradient id="route" x1="158" y1="398" x2="351" y2="116" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffb000"/>
+      <stop offset="1" stop-color="#ff4d00"/>
+    </linearGradient>
+  </defs>
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bg)"/>
+  <path d="M153 401c-2-58 21-94 66-110 51-18 72-48 63-91-8-38 10-72 76-91" fill="none" stroke="#050608" stroke-width="58" stroke-linecap="round"/>
+  <path d="M153 401c-2-58 21-94 66-110 51-18 72-48 63-91-8-38 10-72 76-91" fill="none" stroke="url(#route)" stroke-width="31" stroke-linecap="round"/>
+  <path d="M132 385l22 35 31-27" fill="#f5f7fa"/>
+  <circle cx="359" cy="108" r="31" fill="#f5f7fa"/>
+  <circle cx="359" cy="108" r="13" fill="#ff4d00"/>
+</svg>
